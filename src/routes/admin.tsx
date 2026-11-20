@@ -5,12 +5,13 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { MessageSquare, Package, Users } from 'lucide-react'
+import { MessageSquare, Package, Shield, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { ChatThread } from '@/components/chat-thread'
 import { OrderPanel } from '@/components/order-panel'
 import { PortalShell } from '@/components/portal-shell'
+import { StaffAdmins } from '@/components/staff-admins'
 import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
 import {
@@ -24,7 +25,10 @@ import { listStaffOrders } from '@/lib/orders.functions'
 import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
-  tab: z.enum(['chat', 'orders', 'customers']).optional().catch(undefined),
+  tab: z
+    .enum(['chat', 'orders', 'customers', 'admins'])
+    .optional()
+    .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
   order: z.string().max(20).optional().catch(undefined),
   chat: z.uuid().optional().catch(undefined),
@@ -34,11 +38,12 @@ const staffPages = [
   { key: 'chat', label: 'Website chat', Icon: MessageSquare },
   { key: 'orders', label: 'Orders', Icon: Package },
   { key: 'customers', label: 'Customers', Icon: Users },
+  { key: 'admins', label: 'Admins', Icon: Shield },
 ] as const
 
 export const Route = createFileRoute('/admin')({
   validateSearch: (search) => searchSchema.parse(search),
-  beforeLoad: async ({ location }) => {
+  beforeLoad: async ({ location, search }) => {
     const user = await getServerUser()
     if (!user)
       throw redirect({ to: '/account', search: { next: location.href } })
@@ -48,6 +53,10 @@ export const Route = createFileRoute('/admin')({
         search: { next: '/admin', denied: true },
       })
     }
+    if (search.tab === 'admins' && !user.canManageStaff) {
+      throw redirect({ to: '/admin', search: { tab: 'chat' } })
+    }
+    return { canManageStaff: user.canManageStaff }
   },
   loaderDeps: ({ search }) => ({ tab: search.tab, customer: search.customer }),
   loader: ({ deps }) =>
@@ -67,6 +76,7 @@ export const Route = createFileRoute('/admin')({
 function Admin() {
   const { tab = 'chat', customer, chat } = Route.useSearch()
   const orders = Route.useLoaderData()
+  const { canManageStaff } = Route.useRouteContext()
   return (
     <PortalShell>
       <h1 className="mb-5 text-4xl font-semibold">Staff portal</h1>
@@ -74,20 +84,27 @@ function Admin() {
         className="mb-6 flex flex-wrap gap-2 border-b pb-3"
         aria-label="Staff portal"
       >
-        {staffPages.map(({ key, label, Icon }) => (
-          <Button key={key} variant={tab === key ? 'default' : 'ghost'} asChild>
-            <Link
-              to="/admin"
-              search={{ tab: key }}
-              aria-current={tab === key ? 'page' : undefined}
+        {staffPages
+          .filter(({ key }) => key !== 'admins' || canManageStaff)
+          .map(({ key, label, Icon }) => (
+            <Button
+              key={key}
+              variant={tab === key ? 'default' : 'ghost'}
+              asChild
             >
-              <Icon /> {label}
-            </Link>
-          </Button>
-        ))}
+              <Link
+                to="/admin"
+                search={{ tab: key }}
+                aria-current={tab === key ? 'page' : undefined}
+              >
+                <Icon /> {label}
+              </Link>
+            </Button>
+          ))}
       </nav>
       {tab === 'chat' && <SupportInbox key={chat ?? 'inbox'} focus={chat} />}
       {tab === 'customers' && <StaffCustomers selected={customer} />}
+      {tab === 'admins' && canManageStaff && <StaffAdmins />}
       {tab === 'orders' && <StaffOrders orders={orders} customer={customer} />}
     </PortalShell>
   )

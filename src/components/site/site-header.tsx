@@ -31,12 +31,15 @@ export function SiteHeader() {
     <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-content items-center justify-between gap-4 px-4 sm:px-6">
         <Logo />
-        <nav className="hidden items-center gap-6 text-sm font-medium md:flex">
+        <nav className="hidden items-center gap-5 text-sm font-medium lg:flex">
           <NavLinks className="text-muted-foreground transition-colors hover:text-foreground motion-reduce:transition-none" />
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           <Button variant="ghost" asChild>
             <Link to="/dashboard">Customer portal</Link>
+          </Button>
+          <Button variant="ghost" asChild>
+            <Link to="/admin" preload={false}>Staff portal</Link>
           </Button>
           <Button variant="ghost" asChild>
             <Link to="/account" search={{ signup: true }}>Sign up</Link>
@@ -45,25 +48,30 @@ export function SiteHeader() {
             <Link to="/order">Order now</Link>
           </Button>
         </div>
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
-              <Menu />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="right" className="p-6">
-            <SheetTitle>Menu</SheetTitle>
-            <SheetDescription className="sr-only">Site navigation</SheetDescription>
-            <nav className="mt-4 flex flex-col gap-4 text-base font-medium">
-              <NavLinks />
-              <Link to="/dashboard">Customer portal</Link>
-              <Link to="/account" search={{ signup: true }}>Sign up</Link>
-              <Button asChild className="mt-2">
-                <Link to="/order">Order now</Link>
+        <div className="flex items-center gap-1 md:hidden">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/admin" preload={false}>Staff portal</Link>
+          </Button>
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
+                <Menu />
               </Button>
-            </nav>
-          </SheetContent>
-        </Sheet>
+            </SheetTrigger>
+            <SheetContent side="right" className="p-6">
+              <SheetTitle>Menu</SheetTitle>
+              <SheetDescription className="sr-only">Site navigation</SheetDescription>
+              <nav className="mt-4 flex flex-col gap-4 text-base font-medium">
+                <NavLinks />
+                <Link to="/dashboard">Customer portal</Link>
+                <Link to="/account" search={{ signup: true }}>Sign up</Link>
+                <Button asChild className="mt-2">
+                  <Link to="/order">Order now</Link>
+                </Button>
+              </nav>
+            </SheetContent>
+          </Sheet>
+        </div>
       </div>
     </header>
   )

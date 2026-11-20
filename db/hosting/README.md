@@ -44,7 +44,7 @@ For either host, set the Paystack webhook to `/api/paystack-webhook` on the depl
 ## Portal entry points
 
 - Customers sign in through the Customer portal and use `/dashboard` for their orders and live support.
-- Staff use `/admin` and an account with the server-managed `admin` role. The Website chat inbox handles both guests and account holders. Open a customer from Customers to update their display name or support notes, find orders, or start a chat.
+- Staff use the Staff portal link or `/admin` and an account with the server-managed `admin` role. The site owner has both `admin` and `staff_manager` and can grant admin access to confirmed accounts under Admins. The Website chat inbox handles both guests and account holders. Open a customer from Customers to update their display name or support notes, find orders, or start a chat.
 - Staff can deliver drafts, final copies, originality reports and supporting materials from an order. Final copies appear to the customer after staff marks the order delivered. Uploads accept up to eight files at a time, 4 MB per file.
 
 ## Migrate data and verify the cutover

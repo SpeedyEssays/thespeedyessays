@@ -4,7 +4,8 @@ import { supabaseConfig, useSupabase } from './supabase-config'
 
 function auth() {
   const { url, key } = supabaseConfig()
-  return createBrowserClient(url, key).auth
+  return createBrowserClient(url, key, { auth: { detectSessionInUrl: false } })
+    .auth
 }
 
 export async function login(email: string, password: string) {
@@ -13,12 +14,19 @@ export async function login(email: string, password: string) {
   if (error) throw error
 }
 
-export async function signup(email: string, password: string, data: { full_name: string }) {
+export async function signup(
+  email: string,
+  password: string,
+  data: { full_name: string },
+) {
   if (!useSupabase) return netlify.signup(email, password, data)
   const { error } = await auth().signUp({
     email,
     password,
-    options: { data, emailRedirectTo: new URL('/account', window.location.origin).href },
+    options: {
+      data,
+      emailRedirectTo: new URL('/account', window.location.origin).href,
+    },
   })
   if (error) throw error
 }
@@ -31,10 +39,30 @@ export async function requestPasswordRecovery(email: string) {
   if (error) throw error
 }
 
-export async function recoverPassword(token: string, password: string) {
-  if (!useSupabase) return netlify.recoverPassword(token, password)
-  const { error } = await auth().updateUser({ password })
+export async function recoverPassword(
+  token: string,
+  password: string,
+  recoveryUserId?: string,
+) {
+  if (!useSupabase) {
+    await netlify.recoverPassword(token, password)
+    return false
+  }
+  const client = auth()
+  const current = await client.getUser()
+  if (
+    !recoveryUserId ||
+    current.error ||
+    current.data.user?.id !== recoveryUserId
+  ) {
+    throw Object.assign(new Error('The recovery session has changed.'), {
+      code: 'recovery_session_changed',
+    })
+  }
+  const { data, error } = await client.updateUser({ password })
   if (error) throw error
+  const roles = data.user.app_metadata.roles
+  return Array.isArray(roles) && roles.includes('admin')
 }
 
 export async function logout() {
@@ -48,28 +76,73 @@ export async function refreshBrowserSession() {
   return auth().getSession()
 }
 
-export async function readSupabaseAccountLink(): Promise<'reset' | 'signed-in' | null> {
+type AccountLink =
+  | { mode: 'reset'; userId: string; email?: string }
+  | { mode: 'signed-in' }
+  | null
+
+export async function readSupabaseAccountLink(): Promise<AccountLink> {
   if (!useSupabase) return null
   const url = new URL(window.location.href)
-  const type = url.searchParams.get('type')
-  const token_hash = url.searchParams.get('token_hash')
-  const code = url.searchParams.get('code')
-  const flaggedRecovery = type === 'recovery' || url.searchParams.get('recovery') === 'true'
-  if (!token_hash && !code && !flaggedRecovery) return null
+  const params = url.searchParams
+  const type = params.get('type')
+  const hash = params.get('token_hash')
+  const code = params.get('code')
+  const recovery = params.get('recovery') === 'true'
+  const fragment = new URLSearchParams(url.hash.slice(1))
+  const authError = [params, fragment].some(
+    (part) => part.has('error') || part.has('error_code'),
+  )
+  if (!hash && !code && !recovery && !authError) return null
 
-  if (token_hash && (type === 'email' || type === 'signup' || type === 'invite' || type === 'recovery')) {
-    const { error } = await auth().verifyOtp({ type, token_hash })
+  try {
+    const client = auth()
+    if (
+      hash &&
+      (type === 'email' ||
+        type === 'signup' ||
+        type === 'invite' ||
+        type === 'recovery')
+    ) {
+      const { data, error } = await client.verifyOtp({ type, token_hash: hash })
+      if (error) throw error
+      if (!data.session || !data.user) throw new Error('Invalid account link.')
+      return type === 'invite' || type === 'recovery'
+        ? { mode: 'reset', userId: data.user.id, email: data.user.email }
+        : { mode: 'signed-in' }
+    }
+    if (!code) throw new Error('Invalid or expired account link.')
+    const flowId = params.get('sb_flow_id')
+    const { data, error } = await client.exchangeCodeForSession(
+      code,
+      flowId ? { flowId } : undefined,
+    )
     if (error) throw error
-  } else if (code || flaggedRecovery) {
-    // The browser client handles PKCE automatically. Await its initialization.
-    const { data, error } = await auth().getSession()
-    if (error || !data.session) throw new Error('Invalid or expired account link.')
-  } else {
-    throw new Error('Invalid account link.')
+    if (!data.session || !data.user)
+      throw new Error('Invalid or expired account link.')
+    return recovery ||
+      ('redirectType' in data && data.redirectType === 'recovery')
+      ? { mode: 'reset', userId: data.user.id, email: data.user.email }
+      : { mode: 'signed-in' }
+  } finally {
+    for (const key of [
+      'code',
+      'sb_flow_id',
+      'token_hash',
+      'type',
+      'error',
+      'error_code',
+      'error_description',
+      'recovery',
+    ]) {
+      params.delete(key)
+    }
+    window.history.replaceState(
+      window.history.state,
+      '',
+      url.pathname + url.search,
+    )
   }
-
-  window.history.replaceState(window.history.state, '', url.pathname)
-  return flaggedRecovery || type === 'invite' ? 'reset' : 'signed-in'
 }
 
 export const { acceptInvite, handleAuthCallback } = netlify

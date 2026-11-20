@@ -16,3 +16,9 @@ export const requireAdmin = createMiddleware({ type: 'function' }).server(async 
   if (!user?.isAdmin) throw new Error('Admin access required.')
   return next({ context: { user } })
 })
+
+export const requireStaffManager = createMiddleware({ type: 'function' }).server(async ({ next }) => {
+  const user = await readSessionUser()
+  if (!user?.canManageStaff) throw new Error('Only the site owner can manage staff access.')
+  return next({ context: { user } })
+})

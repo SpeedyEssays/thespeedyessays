@@ -15,6 +15,7 @@ export type SessionUser = {
   name: string | null
   email: string
   isAdmin: boolean
+  canManageStaff: boolean
 }
 
 export async function readSessionUser(): Promise<SessionUser | null> {
@@ -27,6 +28,7 @@ export async function readSessionUser(): Promise<SessionUser | null> {
           name: user.name ?? null,
           email: user.email ?? '',
           isAdmin: !!user.roles?.includes('admin'),
+          canManageStaff: false,
         }
       : null
   }
@@ -36,6 +38,8 @@ export async function readSessionUser(): Promise<SessionUser | null> {
   if (error || !data.user?.email || !data.user.email_confirmed_at) return null
 
   const { id, email, user_metadata, app_metadata } = data.user
+  const roles = Array.isArray(app_metadata.roles) ? app_metadata.roles : []
+  const isAdmin = roles.includes('admin')
   return {
     id,
     email,
@@ -43,8 +47,8 @@ export async function readSessionUser(): Promise<SessionUser | null> {
       typeof user_metadata.full_name === 'string'
         ? user_metadata.full_name
         : null,
-    isAdmin:
-      Array.isArray(app_metadata.roles) && app_metadata.roles.includes('admin'),
+    isAdmin,
+    canManageStaff: isAdmin && roles.includes('staff_manager'),
   }
 }
 

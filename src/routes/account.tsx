@@ -18,6 +18,36 @@ import { Label } from '@/components/ui/label'
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'invite'
 
+function accountError(mode: Mode, error: unknown) {
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? error.code
+      : undefined
+  if (mode === 'reset') {
+    if (code === 'same_password')
+      return 'Choose a password different from your current one.'
+    if (code === 'weak_password')
+      return 'Choose a stronger password of at least 8 characters.'
+    if (code === 'recovery_session_changed' || code === 'session_not_found') {
+      return 'This reset session has ended. Request a new link from the sign-in page.'
+    }
+  }
+  if (mode === 'login') {
+    if (code === 'email_not_confirmed')
+      return 'Confirm your email address before signing in.'
+    if (code === 'invalid_credentials')
+      return 'The email or password is incorrect. Use Forgot password? if you need a new password.'
+    return 'Sign-in failed. Check your email and password and try again.'
+  }
+  if (
+    code === 'over_email_send_rate_limit' ||
+    code === 'over_request_rate_limit'
+  ) {
+    return 'Too many requests. Wait a few minutes before trying again.'
+  }
+  return 'We couldn’t complete this request. Check your details or request a new link.'
+}
+
 function accountDestination(next: unknown) {
   if (
     typeof next !== 'string' ||
@@ -59,6 +89,10 @@ function Account() {
   const [problem, setProblem] = useState('')
   const [notice, setNotice] = useState('')
   const [token, setToken] = useState('')
+  const [recovery, setRecovery] = useState<{
+    userId: string
+    email?: string
+  } | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -68,15 +102,19 @@ function Account() {
       if (useSupabase) {
         void readSupabaseAccountLink()
           .then((result) => {
-            if (result === 'signed-in') window.location.replace(next)
-            else {
-              if (result === 'reset') setMode('reset')
-              setReady(true)
+            if (result?.mode === 'signed-in') {
+              window.location.replace(next)
+              return
             }
+            if (result?.mode === 'reset') {
+              setRecovery(result)
+              setMode('reset')
+            }
+            setReady(true)
           })
           .catch(() => {
             setProblem(
-              'This account link could not be verified. Check whether it has expired and try signing in.',
+              'This account link is expired or was opened in a different browser. Use Forgot password? to send a new link, then open the latest email in this browser.',
             )
             setReady(true)
           })
@@ -140,20 +178,24 @@ function Account() {
       } else if (mode === 'forgot') {
         await requestPasswordRecovery(email.trim())
         setNotice(
-          'If this email has an account, you’ll receive a password reset link.',
+          'If the email has an account, we’ll send a password reset link. Open the latest email in this browser.',
         )
       } else {
-        if (mode === 'reset') await recoverPassword(token, password)
-        else if (mode === 'invite') await acceptInvite(token, password)
+        if (mode === 'reset') {
+          const restoredStaff = await recoverPassword(
+            token,
+            password,
+            recovery?.userId,
+          )
+          window.location.replace(restoredStaff ? '/admin' : next)
+          return
+        }
+        if (mode === 'invite') await acceptInvite(token, password)
         else await login(email.trim(), password)
         window.location.assign(next)
       }
-    } catch {
-      setProblem(
-        mode === 'login'
-          ? 'Sign-in failed. Check your email and password, and confirm your email if you just registered.'
-          : 'We couldn’t complete this request. Check your details or request a new link and try again.',
-      )
+    } catch (error) {
+      setProblem(accountError(mode, error))
     } finally {
       setPending(false)
     }
@@ -174,8 +216,8 @@ function Account() {
         {staff && (
           <p className="mt-2 text-sm text-muted-foreground">
             {denied
-              ? 'This account has customer access. Sign in with your staff account to continue.'
-              : 'Use your SpeedyEssays staff account.'}
+              ? 'This account has customer access. Use a staff email, or ask the site owner to grant staff access.'
+              : 'Sign in with your staff account to see customer chats and orders.'}
           </p>
         )}
         {ready ? (
@@ -183,6 +225,11 @@ function Account() {
             onSubmit={submit}
             className="mt-6 space-y-4 rounded-xl border bg-card p-6"
           >
+            {mode === 'reset' && recovery?.email && (
+              <p className="break-all text-sm text-muted-foreground">
+                New password for {recovery.email}
+              </p>
+            )}
             {mode === 'signup' && (
               <div className="space-y-2">
                 <Label htmlFor="account-name">Full name</Label>
@@ -211,13 +258,16 @@ function Account() {
             )}
             {mode !== 'forgot' && (
               <div className="space-y-2">
-                <Label htmlFor="account-password">Password</Label>
+                <Label htmlFor="account-password">
+                  {mode === 'reset' ? 'New password' : 'Password'}
+                </Label>
                 <Input
                   id="account-password"
                   autoComplete={
                     mode === 'login' ? 'current-password' : 'new-password'
                   }
                   type="password"
+                  name="password"
                   value={password}
                   minLength={mode === 'login' ? undefined : 8}
                   onChange={(event) => setPassword(event.target.value)}
@@ -235,7 +285,7 @@ function Account() {
                 {notice}
               </p>
             )}
-            <Button className="w-full" disabled={pending}>
+            <Button type="submit" className="w-full" disabled={pending}>
               {pending
                 ? 'Please wait…'
                 : mode === 'forgot'
