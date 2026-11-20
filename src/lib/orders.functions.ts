@@ -1,12 +1,12 @@
 import { createServerFn } from '@tanstack/react-start'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 
-import { db } from '../../db'
-import { orderMessages, orders } from '../../db/schema'
-import { requireUser } from './identity.functions'
-import { findAccessibleOrder, listOrdersForUser } from './order-records'
-import { orderCode, type OrderMessageView } from './orders'
+import { getDb } from '../../db'
+import { orderFiles, orderMessages, orders } from '../../db/schema'
+import { requireAdmin, requireUser } from './identity.functions'
+import { findAccessibleOrder, listAllOrders, listOrdersForUser } from './order-records'
+import { orderCode, REVISION_WINDOW_DAYS, type OrderMessageView } from './orders'
 import { academicLevels, assignmentTypes, deadlines, estimatePrice, formattingStyles } from './pricing'
 
 const levelIds = academicLevels.map((l) => l.id) as [string, ...string[]]
@@ -21,9 +21,14 @@ const createOrderInput = z.object({
   sources: z.coerce.number().int().min(0).max(100),
   pages: z.number().int().min(1).max(200),
   deadline: z.enum(deadlineIds),
-  extras: z.object({ topWriter: z.boolean().optional(), draftPreview: z.boolean().optional(), abstractPage: z.boolean().optional() }),
+  extras: z.object({
+    topWriter: z.boolean().optional(),
+    draftPreview: z.boolean().optional(),
+    abstractPage: z.boolean().optional(),
+  }),
   instructions: z.string().max(20000),
-  payment: z.enum(['card', 'paypal']),
+  submissionId: z.uuid(),
+  agree: z.literal(true),
   hasFiles: z.boolean(),
 })
 
@@ -37,12 +42,18 @@ export const createOrder = createServerFn({ method: 'POST' })
     const level = academicLevels.find((l) => l.id === data.level)!
     const deadline = deadlines.find((d) => d.id === data.deadline)!
     // Never trust a client-side total: recompute from the shared price table.
-    const quote = estimatePrice({ level: level.id, deadline: deadline.id, pages: data.pages, extras: data.extras })
+    const quote = estimatePrice({
+      level: level.id,
+      deadline: deadline.id,
+      pages: data.pages,
+      extras: data.extras,
+    })
 
-    const [row] = await db
+    const [row] = await getDb()
       .insert(orders)
       .values({
         userId: context.user.id,
+        submissionId: data.submissionId,
         clientEmail: context.user.email,
         clientName: context.user.name,
         type: data.type,
@@ -56,23 +67,93 @@ export const createOrder = createServerFn({ method: 'POST' })
         dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
         extras: data.extras,
         instructions: data.instructions.trim(),
-        paymentMethod: data.payment,
+        paymentMethod: 'paystack',
         priceCents: Math.round(quote.total * 100),
       })
+      .onConflictDoNothing({ target: orders.submissionId })
       .returning()
 
-    await db.insert(orderMessages).values({
-      orderId: row.id,
-      sender: 'support',
-      body: `Thanks for your order! We’ve received your brief for “${row.topic}”. Our team will confirm the details and send your ${data.payment === 'card' ? 'card' : 'PayPal'} payment link here shortly. Reply in this thread any time.`,
-    })
-
-    return { code: orderCode(row.id), total: quote.total }
+    const [existing] = row
+      ? []
+      : await getDb()
+          .select()
+          .from(orders)
+          .where(and(eq(orders.submissionId, data.submissionId), eq(orders.userId, context.user.id)))
+    const saved = row ?? existing
+    if (!saved) throw new Error('Could not save the order. Start a new order and try again.')
+    return { code: orderCode(saved.id) }
   })
 
 export const listMyOrders = createServerFn({ method: 'GET' })
   .middleware([requireUser])
   .handler(({ context }) => listOrdersForUser(context.user.id))
+
+export const listStaffOrders = createServerFn({ method: 'GET' })
+  .middleware([requireAdmin])
+  .handler(() => listAllOrders())
+
+export const updateOrderStatus = createServerFn({ method: 'POST' })
+  .middleware([requireAdmin])
+  .validator(
+    z.object({
+      code: z.string().max(20),
+      status: z.enum(['in-progress', 'draft-ready', 'completed', 'cancelled']),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const order = await findAccessibleOrder(data.code, context.user)
+    if (!order) throw new Error('Order not found.')
+    if (data.status === 'cancelled') {
+      if (order.status !== 'awaiting-payment' || order.paymentReference) {
+        throw new Error(
+          'This order cannot be cancelled here because checkout has already started or the order was paid.',
+        )
+      }
+    } else {
+      if (
+        !order.paidAt ||
+        !['paid', 'writer-assigned', 'in-progress', 'draft-ready', 'revision'].includes(order.status)
+      ) {
+        throw new Error('This order is not ready for a fulfilment update.')
+      }
+      if (data.status === 'completed' || data.status === 'draft-ready') {
+        const [paper] = await getDb()
+          .select({ id: orderFiles.id })
+          .from(orderFiles)
+          .where(
+            and(
+              eq(orderFiles.orderId, order.id),
+              eq(orderFiles.kind, data.status === 'completed' ? 'final' : 'paper'),
+            ),
+          )
+          .limit(1)
+        if (!paper)
+          throw new Error(
+            data.status === 'completed'
+              ? 'Upload a final copy before marking this order delivered.'
+              : 'Upload a draft before marking this order draft ready.',
+          )
+      }
+    }
+    const now = new Date()
+    const [updated] = await getDb()
+      .update(orders)
+      .set({
+        status: data.status,
+        updatedAt: now,
+        deliveredAt: data.status === 'completed' ? now : order.deliveredAt,
+      })
+      .where(
+        and(
+          eq(orders.id, order.id),
+          eq(orders.status, order.status),
+          ...(data.status === 'cancelled' ? [isNull(orders.paymentReference)] : []),
+        ),
+      )
+      .returning({ id: orders.id })
+    if (!updated) throw new Error('The order was updated elsewhere. Refresh and try again.')
+    return { ok: true }
+  })
 
 export const getOrderMessages = createServerFn({ method: 'GET' })
   .middleware([requireUser])
@@ -80,19 +161,36 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
   .handler(async ({ data, context }): Promise<OrderMessageView[]> => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
-    const rows = await db.select().from(orderMessages).where(eq(orderMessages.orderId, order.id)).orderBy(asc(orderMessages.createdAt))
-    return rows.map((m) => ({ id: m.id, sender: m.sender as OrderMessageView['sender'], body: m.body, at: m.createdAt.toISOString() }))
+    const rows = await getDb()
+      .select()
+      .from(orderMessages)
+      .where(eq(orderMessages.orderId, order.id))
+      .orderBy(asc(orderMessages.id))
+    return rows.map((m) => ({
+      id: m.id,
+      sender: m.sender as OrderMessageView['sender'],
+      body: m.body,
+      at: m.createdAt.toISOString(),
+    }))
   })
 
 export const sendOrderMessage = createServerFn({ method: 'POST' })
   .middleware([requireUser])
-  .validator(z.object({ code: z.string().max(20), body: z.string().trim().min(1).max(5000), asSupport: z.boolean().optional() }))
+  .validator(
+    z.object({
+      code: z.string().max(20),
+      body: z.string().trim().min(1).max(5000),
+      asSupport: z.boolean().optional(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     if (data.asSupport && !context.user.isAdmin) throw new Error('Admin access required.')
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
-    await db.insert(orderMessages).values({ orderId: order.id, sender: data.asSupport ? 'support' : 'client', body: data.body })
-    await db.update(orders).set({ updatedAt: new Date() }).where(eq(orders.id, order.id))
+    await getDb()
+      .insert(orderMessages)
+      .values({ orderId: order.id, sender: data.asSupport ? 'support' : 'client', body: data.body })
+    await getDb().update(orders).set({ updatedAt: new Date() }).where(eq(orders.id, order.id))
     return { ok: true }
   })
 
@@ -102,10 +200,23 @@ export const requestRevision = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, { ...context.user, isAdmin: false })
     if (!order) throw new Error('Order not found.')
+    const delivered = order.deliveredAt ?? order.updatedAt
+    if (order.status === 'completed' && Date.now() > delivered.getTime() + REVISION_WINDOW_DAYS * 86400000) {
+      throw new Error('The 14-day revision window has ended.')
+    }
     if (order.status !== 'draft-ready' && order.status !== 'completed') {
       throw new Error('Revisions open once your draft is delivered.')
     }
-    await db.update(orders).set({ status: 'revision', updatedAt: new Date() }).where(eq(orders.id, order.id))
-    await db.insert(orderMessages).values({ orderId: order.id, sender: 'client', body: `Revision request: ${data.notes}` })
+    await getDb().transaction(async (tx) => {
+      const [updated] = await tx
+        .update(orders)
+        .set({ status: 'revision', updatedAt: new Date() })
+        .where(and(eq(orders.id, order.id), inArray(orders.status, ['draft-ready', 'completed'])))
+        .returning({ id: orders.id })
+      if (!updated) throw new Error('An order update is already in progress. Refresh and try again.')
+      await tx
+        .insert(orderMessages)
+        .values({ orderId: order.id, sender: 'client', body: `Revision request: ${data.notes}` })
+    })
     return { ok: true }
   })

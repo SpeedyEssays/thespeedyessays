@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, CreditCard, FileUp, Lock, Paperclip, X } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, FileUp, Paperclip, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,10 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { PageShell } from '@/components/site/page-shell'
-import { PaymentBadges } from '@/components/site/trust-badges'
+import { getServerUser } from '@/lib/identity.functions'
+import { uploadOrderFile } from '@/lib/files.functions'
+import { createOrder } from '@/lib/orders.functions'
+import { checkOrderFile, orderFileAccept } from '@/lib/orders'
 import {
   academicLevels,
   assignmentTypes,
@@ -34,13 +37,19 @@ export const Route = createFileRoute('/order')({
     deadline: deadlines.some((d) => d.id === search.deadline) ? (search.deadline as DeadlineId) : undefined,
     pages: Number.isFinite(Number(search.pages)) && Number(search.pages) > 0 ? Number(search.pages) : undefined,
   }),
+  beforeLoad: async ({ location }) => {
+    const user = await getServerUser()
+    if (!user) throw redirect({ to: '/account', search: { next: location.href } })
+    return { user }
+  },
+  headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({ meta: [{ title: 'Place an order — SpeedyEssays' }] }),
   component: OrderPage,
 })
 
 const subjects = ['Nursing', 'Business', 'History', 'Psychology', 'Economics', 'English Literature', 'Sociology', 'Biology', 'Law', 'Computer Science', 'Other']
 
-const steps = ['Assignment', 'Length & deadline', 'Instructions', 'Review & pay'] as const
+const steps = ['Assignment', 'Length & deadline', 'Instructions', 'Review'] as const
 
 type FormState = {
   type: string
@@ -54,15 +63,16 @@ type FormState = {
   extras: Extras
   instructions: string
   files: File[]
-  email: string
-  payment: 'card' | 'paypal'
   agree: boolean
 }
 
 function OrderPage() {
   const search = Route.useSearch()
   const [step, setStep] = useState(0)
-  const [placed, setPlaced] = useState<string | null>(null)
+  const { user } = Route.useRouteContext()
+  const [placed, setPlaced] = useState<{ code: string; failedFiles: string[] } | null>(null)
+  const submission = useRef<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState<FormState>({
     type: 'Essay',
@@ -76,8 +86,6 @@ function OrderPage() {
     extras: {},
     instructions: '',
     files: [],
-    email: '',
-    payment: 'card',
     agree: false,
   })
   const quote = estimatePrice(form)
@@ -97,22 +105,64 @@ function OrderPage() {
       e.instructions = 'Add at least a sentence of instructions or upload your prompt'
     }
     if (s === 3) {
-      if (!/^\S+@\S+\.\S+$/.test(form.email)) e.email = 'Enter a valid email address'
       if (!form.agree) e.agree = 'Please accept the terms to continue'
     }
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
-  function next() {
-    if (!validate(step)) return
+  function addFiles(files: File[]) {
+    if (files.some((file) => !checkOrderFile(file)) || form.files.length + files.length > 8) {
+      toast.error('Choose up to eight supported files, no larger than 4 MB each.')
+      return
+    }
+    set('files', [...form.files, ...files])
+  }
+
+  async function next() {
+    if (busy || !validate(step)) return
     if (step < steps.length - 1) {
       setStep(step + 1)
       window.scrollTo({ top: 0, behavior: 'smooth' })
-    } else {
-      const id = `SE-${48300 + Math.floor(Math.random() * 600)}`
-      setPlaced(id)
-      toast.success(`Order ${id} created`)
+      return
+    }
+
+    setBusy(true)
+    submission.current ??= crypto.randomUUID()
+    try {
+      const { code } = await createOrder({ data: {
+        type: form.type as (typeof assignmentTypes)[number],
+        style: form.style as (typeof formattingStyles)[number],
+        topic: form.topic,
+        subject: form.subject,
+        pages: form.pages,
+        level: form.level,
+        deadline: form.deadline,
+        sources: Number(form.sources),
+        instructions: form.instructions,
+        extras: form.extras,
+        agree: true,
+        hasFiles: form.files.length > 0,
+        submissionId: submission.current,
+      } })
+      const failedFiles: string[] = []
+      for (const file of form.files) {
+        const data = new FormData()
+        data.set('code', code)
+        data.set('kind', 'brief')
+        data.set('uploadId', crypto.randomUUID())
+        data.set('file', file)
+        try {
+          await uploadOrderFile({ data })
+        } catch {
+          failedFiles.push(file.name)
+        }
+      }
+      setPlaced({ code, failedFiles })
+    } catch {
+      toast.error('Your order couldn’t be saved. Check your details or try again.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -121,15 +171,14 @@ function OrderPage() {
       <PageShell>
         <div className="mx-auto max-w-reading px-4 py-20 text-center sm:px-6">
           <CheckCircle2 className="mx-auto size-14 text-success" />
-          <h1 className="mt-6 text-4xl font-semibold">Order {placed} received</h1>
+          <h1 className="mt-6 text-4xl font-semibold">Order {placed.code} saved</h1>
           <p className="mt-4 text-muted-foreground">
-            We’ve saved your brief and sent a confirmation to <span className="font-medium text-foreground">{form.email}</span>.
-            Once payment of <span className="font-medium text-foreground">{formatUSD(quote.total)}</span> is confirmed, a{' '}
-            {academicLevels.find((l) => l.id === form.level)?.label} {form.subject} specialist is assigned — usually within 15 minutes.
+            Open your order in the dashboard to continue to payment.
           </p>
+          {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them in your dashboard before paying. {placed.failedFiles.join(', ')}</p>}
           <div className="mt-8 flex justify-center gap-3">
             <Button asChild>
-              <Link to="/dashboard">Go to my dashboard</Link>
+              <Link to="/dashboard" search={{ order: placed.code }}>Open my order</Link>
             </Button>
             <Button variant="outline" asChild>
               <Link to="/">Back to home</Link>
@@ -151,7 +200,7 @@ function OrderPage() {
               <li key={label}>
                 <button
                   type="button"
-                  disabled={i > step}
+                  disabled={busy || i > step}
                   onClick={() => setStep(i)}
                   className="group w-full text-left disabled:cursor-not-allowed"
                   aria-current={i === step ? 'step' : undefined}
@@ -352,20 +401,20 @@ function OrderPage() {
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault()
-                    set('files', [...form.files, ...Array.from(e.dataTransfer.files)])
+                    addFiles(Array.from(e.dataTransfer.files))
                   }}
                   className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-muted/40 px-6 py-10 text-center transition-colors hover:bg-muted motion-reduce:transition-none"
                 >
                   <FileUp className="size-8 text-muted-foreground" />
                   <span className="mt-3 text-sm font-medium">Drag files here or click to browse</span>
-                  <span className="mt-1 text-xs text-muted-foreground">PDF, DOCX, PPTX, images · up to 25 MB each</span>
+                  <span className="mt-1 text-xs text-muted-foreground">PDF, DOCX, PPTX, TXT, PNG or JPEG · up to 4 MB each</span>
                   <input
                     id="files"
                     type="file"
                     multiple
                     className="sr-only"
-                    accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg"
-                    onChange={(e) => set('files', [...form.files, ...Array.from(e.target.files ?? [])])}
+                    accept={orderFileAccept}
+                    onChange={(e) => addFiles(Array.from(e.target.files ?? []))}
                   />
                 </label>
                 {form.files.length > 0 && (
@@ -403,49 +452,7 @@ function OrderPage() {
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
                 <Summary label="Attachments" value={form.files.length ? `${form.files.length} file(s)` : 'None'} />
               </dl>
-              <Field label="Email for order updates" id="email" error={errors.email} hint="Never shared with your writer.">
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={form.email}
-                  aria-invalid={!!errors.email}
-                  onChange={(e) => set('email', e.target.value)}
-                  placeholder="you@university.edu"
-                />
-              </Field>
-              <fieldset>
-                <legend className="mb-2 text-sm font-medium">Payment method</legend>
-                <RadioGroup value={form.payment} onValueChange={(v) => set('payment', v as FormState['payment'])} className="grid gap-2 sm:grid-cols-2">
-                  <Label htmlFor="pay-card" className={cn('flex cursor-pointer items-center gap-3 rounded-md border p-4', form.payment === 'card' && 'border-primary bg-secondary')}>
-                    <RadioGroupItem id="pay-card" value="card" />
-                    <CreditCard className="size-5" />
-                    <span>
-                      <span className="block font-medium">Credit or debit card</span>
-                      <span className="block text-xs font-normal text-muted-foreground">Visa, Mastercard, Amex via Stripe</span>
-                    </span>
-                  </Label>
-                  <Label htmlFor="pay-paypal" className={cn('flex cursor-pointer items-center gap-3 rounded-md border p-4', form.payment === 'paypal' && 'border-primary bg-secondary')}>
-                    <RadioGroupItem id="pay-paypal" value="paypal" />
-                    <span className="font-display text-lg font-bold italic">P</span>
-                    <span>
-                      <span className="block font-medium">PayPal</span>
-                      <span className="block text-xs font-normal text-muted-foreground">Pay with your PayPal balance or card</span>
-                    </span>
-                  </Label>
-                </RadioGroup>
-              </fieldset>
-              <div className="flex items-start gap-3 rounded-md border border-success/30 bg-success/5 p-4 text-sm">
-                <Lock className="mt-0.5 size-4 shrink-0 text-success" />
-                <p>
-                  You’ll be redirected to {form.payment === 'card' ? 'Stripe' : 'PayPal'}’s secure checkout. Your payment is protected by
-                  256-bit SSL encryption and our{' '}
-                  <Link to="/policies/$slug" params={{ slug: 'money-back-guarantee' }} className="font-medium underline">
-                    money-back guarantee
-                  </Link>
-                  .
-                </p>
-              </div>
+              <p className="text-sm">Ordering as <span className="font-medium">{user.email}</span>. After saving your order, open it in your dashboard to pay.</p>
               <div>
                 <Label htmlFor="agree" className="flex items-start gap-3 font-normal">
                   <Checkbox id="agree" checked={form.agree} onCheckedChange={(c) => set('agree', c === true)} aria-invalid={!!errors.agree} />
@@ -462,13 +469,13 @@ function OrderPage() {
           )}
 
           <div className="mt-8 flex items-center justify-between gap-3 border-t pt-6">
-            <Button type="button" variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
+            <Button type="button" variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={busy || step === 0}>
               <ArrowLeft /> Back
             </Button>
-            <Button type="submit" size="lg">
+            <Button type="submit" size="lg" disabled={busy}>
               {step === steps.length - 1 ? (
                 <>
-                  <Lock /> Pay {formatUSD(quote.total)} securely
+                  {busy ? 'Saving order…' : 'Save order'}
                 </>
               ) : (
                 <>
@@ -493,7 +500,6 @@ function OrderPage() {
               <span className="font-medium">Total</span>
               <span className="font-display text-3xl font-semibold tabular-nums">{formatUSD(quote.total)}</span>
             </div>
-            <PaymentBadges compact className="mt-5" />
           </div>
         </aside>
       </div>

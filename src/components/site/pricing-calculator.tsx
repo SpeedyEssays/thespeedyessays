@@ -112,7 +112,7 @@ export function PricingCalculator({ className }: { className?: string }) {
           </Link>
         </Button>
       </div>
-      <PaymentBadges compact className="mt-5" />
+      <PaymentBadges className="mt-5" />
     </div>
   )
 }

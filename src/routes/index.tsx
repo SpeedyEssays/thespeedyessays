@@ -60,7 +60,7 @@ const steps = [
 const faqs = [
   { q: 'Who writes my paper?', a: 'Every writer holds at least a bachelor’s degree, passes an English proficiency and academic writing test, and has their diploma verified before taking orders. Most of our team hold a master’s or PhD.' },
   { q: 'How is the price calculated?', a: 'Price depends on academic level, deadline and page count. Longer deadlines cost less. The calculator shows the exact amount you pay — there are no hidden fees.' },
-  { q: 'Which payment methods do you accept?', a: 'Visa, Mastercard, American Express, PayPal, Apple Pay and Google Pay, processed by Stripe and PayPal over 256-bit SSL. We never store your card details.' },
+  { q: 'Which payment methods do you accept?', a: 'Available payment options appear in your dashboard after you save an order. Card details are entered with the payment provider.' },
   { q: 'Can I talk to my writer?', a: 'Yes. Your dashboard includes a private messaging thread with your writer. It is monitored by our quality team and neither side sees the other’s contact information.' },
   { q: 'What if I need changes?', a: 'Request a revision from your dashboard within 14 days of delivery. Revisions are free as long as the original instructions have not changed.' },
 ]
@@ -190,10 +190,10 @@ function Home() {
               <ShieldCheck className="size-6 text-success" />
               <p className="text-sm">
                 <span className="font-semibold">Secure checkout.</span>{' '}
-                <span className="text-muted-foreground">Payments are processed by Stripe and PayPal — we never see or store your card.</span>
+                <span className="text-muted-foreground">When online payment is available, checkout opens on the payment provider’s website.</span>
               </p>
             </div>
-            <PaymentBadges compact />
+            <PaymentBadges />
           </div>
         </div>
       </section>
@@ -280,7 +280,7 @@ function Home() {
           <p className="text-sm font-semibold tracking-wide text-primary/70 uppercase">Questions</p>
           <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">Everything you need to know</h2>
           <p className="mt-4 text-muted-foreground">
-            Still unsure? Our support team is online around the clock — use the chat in the corner.
+            Still unsure? Send our support team a message using the chat in the corner.
           </p>
           <div className="mt-8 rounded-xl border bg-card p-6">
             <GraduationCap className="size-7 text-primary" />

@@ -15,7 +15,7 @@ export function SiteFooter() {
             Custom academic writing support from vetted, degree-holding writers. Every paper is original, confidential, and
             delivered with a free originality report.
           </p>
-          <PaymentBadges compact className="[&>span]:border-primary-foreground/20 [&>span]:bg-transparent [&>span]:text-primary-foreground/80" />
+          <PaymentBadges className="[&>span]:border-primary-foreground/20 [&>span]:bg-transparent [&>span]:text-primary-foreground/80" />
         </div>
         <div>
           <h2 className="mb-3 font-sans text-sm font-semibold tracking-normal">Clients</h2>

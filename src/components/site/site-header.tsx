@@ -38,6 +38,9 @@ export function SiteHeader() {
           <Button variant="ghost" asChild>
             <Link to="/dashboard">Sign in</Link>
           </Button>
+          <Button variant="ghost" asChild>
+            <Link to="/account" search={{ signup: true }}>Sign up</Link>
+          </Button>
           <Button asChild>
             <Link to="/order">Order now</Link>
           </Button>
@@ -54,6 +57,7 @@ export function SiteHeader() {
             <nav className="mt-4 flex flex-col gap-4 text-base font-medium">
               <NavLinks />
               <Link to="/dashboard">Client dashboard</Link>
+              <Link to="/account" search={{ signup: true }}>Sign up</Link>
               <Button asChild className="mt-2">
                 <Link to="/order">Order now</Link>
               </Button>

@@ -1,32 +1,42 @@
 # SpeedyEssays
 
-An academic writing website where students get an instant price, place a detailed order, and track their paper from brief to delivery — with free originality reports, free revisions, and a money-back guarantee.
+SpeedyEssays is a TanStack Start app hosted on Netlify. It uses Netlify Identity for accounts, Netlify Database for orders and conversations, Netlify Blobs for private files, and Paystack hosted checkout for USD card payments.
 
-## What's live
+| Route        | Use                                                                               |
+| ------------ | --------------------------------------------------------------------------------- |
+| `/`          | Pricing calculator, samples, and visitor support chat                             |
+| `/account`   | Registration, email confirmation, sign-in, and password recovery                  |
+| `/order`     | Authenticated order form and brief upload                                         |
+| `/dashboard` | Customer orders, payment, messages, downloads, and revision requests              |
+| `/admin`     | Staff orders, order replies, draft and final copy uploads, and website chat inbox |
 
-| Route | Screen |
-| --- | --- |
-| `/` | Homepage with instant pricing calculator, how it works, guarantees, samples, verified reviews, FAQ |
-| `/order` | Four-step order form with live price summary, file uploads and secure-payment step |
-| `/dashboard` | Client dashboard: order tracking, downloads, originality reports, revision requests, anonymous writer chat |
-| `/samples` | Sample paper gallery with subject filter and PDF downloads |
-| `/policies/money-back-guarantee`, `/policies/revision-policy`, `/policies/privacy-policy` | Policy pages |
+## Configure a Netlify Deploy Preview
 
-A 24/7 support chat launcher appears on every page.
+1. Connect this repository to the existing Netlify project and open a pull request. Check the deploy log for both database migrations and confirm the preview has an isolated Netlify Database branch. Keep live credentials and actual customer data out of this preview.
+2. In Netlify, enable Identity, choose **Open** registration, and keep email confirmation enabled. Use an Identity test customer and create a separate staff user. In the Identity dashboard assign the staff user the application role `admin`. Sign out and back in after the assignment. A Netlify team member does not automatically have the application role.
+3. For checkout, first confirm with Paystack that your business is eligible to take USD card payments. Enter your settlement details directly in the Paystack Dashboard. Add these as Functions-scoped environment variables in the correct Netlify deploy context. Availability of production payment acceptance depends on merchant approval and configuration.
 
-## Tech
+   | Variable                   | Value                                                                                                                                                    |
+   | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `PAYSTACK_SECRET_KEY`      | Paystack test secret in the Deploy Preview. Use the live secret only in production.                                                                      |
+   | `PAYSTACK_CALLBACK_ORIGIN` | Exact HTTPS origin for that deployment, with no trailing slash.                                                                                          |
+   | `PAYSTACK_WEBHOOK_SECRET`  | Optional Paystack `whsec_` signing secret for the same mode. When unset, the app verifies the legacy `X-Paystack-Signature` header using the API secret. |
 
-- [TanStack Start](https://tanstack.com/start) (React 19, file-based routing, SSR) on Netlify
-- Tailwind CSS 4 + shadcn/ui (Radix) components, lucide icons
-- Netlify Image CDN for imagery
+   Set the webhook URL in the corresponding Paystack test or live settings to the deployment's origin followed by `/api/paystack-webhook`. Orders remain saved and await payment if checkout is unconfigured. The initial integration charges in USD by card. Refunds are handled in the provider dashboard and coordinated in the order message thread.
 
-## Run locally
+4. In the preview, verify registration, email confirmation, sign-in, and password reset. Save an order and a customer brief, try a cancelled or failed sandbox checkout and a successful one, then confirm a repeated webhook does not advance the order again. In `/admin`, reply to a visitor from **Website chat** and to a signed-in customer from **Orders**. Upload a file as **Final copy**, then select **Mark as delivered**. Verify the customer sees and downloads it from the order. Confirm a separate customer cannot view the order, message thread, or direct file URL. Files are limited to 4 MB each.
+
+Website chat is tied to the visitor's browser. Leave **Website chat** open to receive incoming conversations while you are available. Order messages and delivery updates are available in the signed-in portal.
+
+## Local checks
+
+Use Node 22.13+ on the Node 22 line, Node 24, or Node 26+. Install from the checked-in pnpm lockfile. Run:
 
 ```bash
-pnpm install
-netlify dev   # or: pnpm dev
+npm run build
+npm run typecheck
+npm run lint
+npm test
 ```
 
-## Roadmap
-
-Data is currently served from `src/lib/fixtures.ts`. Upcoming milestones (see [PLAN.md](PLAN.md)): persistent orders with Netlify Database and Blobs, client/writer accounts with Netlify Identity, Stripe and PayPal checkout, persisted writer–client messaging with moderation, the writer application portal and writer dashboard, plagiarism-scan integration, live-chat provider and Trustpilot/Sitejabber reviews, and an admin console.
+Use the Netlify preview for hosted Identity, Blobs, and payment sandbox checks. See [PLAN.md](PLAN.md) for the wider marketplace roadmap.
