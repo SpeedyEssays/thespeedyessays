@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
 import { uploadOrderFile } from '@/lib/files.functions'
 import {
+  approveOrder,
   getOrderMessages,
   requestRevision,
   sendOrderMessage,
@@ -13,13 +14,17 @@ import {
 } from '@/lib/orders.functions'
 import {
   canCheckout,
+  canCustomerReadFile,
   checkOrderFile,
   fileKindLabels,
   formatBytes,
   MAX_ORDER_FILES_PER_UPLOAD,
   orderFileAccept,
+  revisionRequestStatuses,
+  staffFileKinds,
   statusMeta,
   type FileKind,
+  type OrderFileView,
   type OrderView,
 } from '@/lib/orders'
 import { formatUSD } from '@/lib/pricing'
@@ -29,10 +34,12 @@ export function OrderPanel({
   order,
   staff = false,
   checkout = false,
+  allowApproval = false,
 }: {
   order: OrderView
   staff?: boolean
   checkout?: boolean
+  allowApproval?: boolean
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -134,7 +141,75 @@ export function OrderPanel({
   }
 
   const payable = canCheckout(order)
-  const active = !['cancelled', 'completed'].includes(order.status)
+  const active = !['cancelled', 'completed', 'approved'].includes(order.status)
+  const customerFiles = order.files.filter((file) => file.kind === 'brief')
+  const staffFiles = order.files.filter((file) => file.kind !== 'brief')
+  const deliveries = staffFileKinds
+    .map((type) => ({
+      type,
+      files: staffFiles.filter((file) => file.kind === type),
+    }))
+    .filter(({ files }) => files.length > 0)
+  const otherFiles = staffFiles.filter((file) => !fileKindLabels[file.kind])
+  const showApproval =
+    !staff &&
+    allowApproval &&
+    order.status === 'completed' &&
+    Boolean(order.deliveredAt) &&
+    staffFiles.some((file) => file.kind === 'final')
+  const uploadForm = (staff ? order.status !== 'cancelled' : active) && (
+    <form className="space-y-2" onSubmit={(event) => void upload(event)}>
+      {staff && (
+        <div className="space-y-2">
+          <Label htmlFor="order-file-type">File type</Label>
+          <select
+            id="order-file-type"
+            className="block rounded border bg-background px-2 py-1 text-sm"
+            value={kind}
+            disabled={busy}
+            onChange={(event) => setKind(event.target.value as FileKind)}
+          >
+            {staffFileKinds.map((type) => (
+              <option key={type} value={type}>
+                {fileKindLabels[type]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <Label htmlFor="order-upload">
+        {staff ? 'Choose files for this customer' : 'Choose supporting files'}
+      </Label>
+      <Input
+        ref={fileInput}
+        id="order-upload"
+        type="file"
+        accept={orderFileAccept}
+        multiple
+        disabled={busy}
+        onChange={(event) => selectFiles(Array.from(event.target.files ?? []))}
+      />
+      <p className="text-xs text-muted-foreground">
+        Up to eight files at a time, 4 MB each.
+        {staff &&
+          !canCustomerReadFile(kind, order.deliveredAt) &&
+          ' These files become visible when you mark the order delivered.'}
+      </p>
+      {filesToUpload.length > 0 && (
+        <p className="break-words text-sm">
+          {filesToUpload.map(({ file }) => file.name).join(', ')}
+        </p>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        type="submit"
+        disabled={busy || !filesToUpload.length}
+      >
+        {busy ? 'Uploading…' : 'Upload files'}
+      </Button>
+    </form>
+  )
 
   return (
     <section
@@ -203,90 +278,64 @@ export function OrderPanel({
           )}
         </div>
       )}
-      <section>
-        <h3 className="text-lg font-semibold">Files</h3>
-        {order.files.length === 0 && (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No files uploaded yet.
+      <section
+        aria-labelledby="customer-files"
+        className="space-y-3 rounded-lg border bg-background p-4"
+      >
+        <h3 id="customer-files" className="text-lg font-semibold">
+          {staff ? 'Customer uploads' : 'Your uploads'}
+        </h3>
+        {customerFiles.length > 0 ? (
+          <OrderFileList files={customerFiles} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {staff
+              ? 'The customer hasn’t uploaded any files yet.'
+              : 'You haven’t uploaded any files yet.'}
           </p>
         )}
-        <ul className="mt-2 space-y-2">
-          {order.files.map((file) => (
-            <li
-              key={file.id}
-              className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-            >
-              <div className="min-w-0">
-                <p className="break-words text-sm font-medium">{file.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {fileKindLabels[file.kind]} · {formatBytes(file.size)}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" asChild>
-                <a href={`/api/files/${file.id}`}>Download</a>
-              </Button>
-            </li>
-          ))}
-        </ul>
-        {(staff ? order.status !== 'cancelled' : active) && (
-          <form
-            className="mt-4 space-y-2"
-            onSubmit={(event) => void upload(event)}
-          >
-            <Label htmlFor="order-upload">
-              {staff
-                ? 'Upload files for this customer'
-                : 'Upload supporting files'}
-            </Label>
-            {staff && (
-              <select
-                aria-label="File type"
-                className="ml-2 rounded border bg-background px-2 py-1 text-sm"
-                value={kind}
-                disabled={busy}
-                onChange={(event) => {
-                  setKind(event.target.value as FileKind)
-                  setProblem('')
-                }}
-              >
-                <option value="final">Final copy</option>
-                <option value="paper">Draft</option>
-                <option value="report">Originality report</option>
-                <option value="material">Supporting material</option>
-              </select>
-            )}
-            <Input
-              ref={fileInput}
-              id="order-upload"
-              type="file"
-              accept={orderFileAccept}
-              multiple
-              disabled={busy}
-              onChange={(event) =>
-                selectFiles(Array.from(event.target.files ?? []))
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              Up to eight files at a time, 4 MB each.
-              {staff &&
-                kind === 'final' &&
-                order.status !== 'completed' &&
-                ' Final copies become visible when you mark the order delivered.'}
-            </p>
-            {filesToUpload.length > 0 && (
-              <p className="break-words text-sm">
-                {filesToUpload.map(({ file }) => file.name).join(', ')}
+        {!staff && uploadForm}
+      </section>
+      <section
+        aria-labelledby="staff-files"
+        className="space-y-4 rounded-lg border bg-background p-4"
+      >
+        <h3 id="staff-files" className="text-lg font-semibold">
+          {staff ? 'Files for customer' : 'Files from support'}
+        </h3>
+        {staffFiles.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {staff
+              ? 'No files for this customer yet.'
+              : 'Files from support will appear here.'}
+          </p>
+        )}
+        {deliveries.map(({ type, files }) => (
+          <div key={type} className="space-y-2">
+            <h4 className="text-sm font-semibold">{fileKindLabels[type]}</h4>
+            {staff && !canCustomerReadFile(type, order.deliveredAt) && (
+              <p className="text-xs text-muted-foreground">
+                Visible to the customer after delivery.
               </p>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              type="submit"
-              disabled={busy || !filesToUpload.length}
-            >
-              {busy ? 'Uploading…' : 'Upload files'}
-            </Button>
-          </form>
+            <OrderFileList files={files} />
+          </div>
+        ))}
+        {otherFiles.length > 0 && <OrderFileList files={otherFiles} />}
+        {staff && uploadForm}
+        {showApproval && (
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () => approveOrder({ data: { code: order.code } }),
+                'Order approved.',
+              )
+            }
+          >
+            Approve order
+          </Button>
         )}
       </section>
       {staff && active && (
@@ -344,7 +393,7 @@ export function OrderPanel({
           {notice}
         </p>
       )}
-      {!staff && ['draft-ready', 'completed'].includes(order.status) && (
+      {!staff && revisionRequestStatuses.includes(order.status) && (
         <form
           className="space-y-2"
           onSubmit={(event) => {
@@ -384,5 +433,33 @@ export function OrderPanel({
         />
       </section>
     </section>
+  )
+}
+
+function OrderFileList({ files }: { files: OrderFileView[] }) {
+  return (
+    <ul className="space-y-2">
+      {files.map((file) => (
+        <li
+          key={file.id}
+          className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="break-words text-sm font-medium">{file.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {formatBytes(file.size)}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={`/api/files/${file.id}`}
+              aria-label={`Download ${file.name}`}
+            >
+              Download
+            </a>
+          </Button>
+        </li>
+      ))}
+    </ul>
   )
 }

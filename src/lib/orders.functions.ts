@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, exists, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { getDb } from '../../db'
@@ -14,6 +14,7 @@ import {
 import {
   orderCode,
   REVISION_WINDOW_DAYS,
+  revisionRequestStatuses,
   type OrderMessageView,
 } from './orders'
 import {
@@ -312,6 +313,44 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+export const approveOrder = createServerFn({ method: 'POST' })
+  .middleware([requireUser])
+  .validator(z.object({ code: z.string().max(20) }))
+  .handler(async ({ data, context }) => {
+    if (context.user.isAdmin)
+      throw new Error('Only the customer can approve this order.')
+    const order = await findAccessibleOrder(data.code, context.user)
+    if (!order) throw new Error('Order not found.')
+    if (order.status === 'approved') return { ok: true }
+
+    const db = getDb()
+    const finalCopy = db
+      .select({ id: orderFiles.id })
+      .from(orderFiles)
+      .where(
+        and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, 'final')),
+      )
+    const [approved] = await db
+      .update(orders)
+      .set({ status: 'approved', updatedAt: new Date() })
+      .where(
+        and(
+          eq(orders.id, order.id),
+          eq(orders.userId, context.user.id),
+          eq(orders.status, 'completed'),
+          isNotNull(orders.deliveredAt),
+          exists(finalCopy),
+        ),
+      )
+      .returning({ id: orders.id })
+    if (!approved) {
+      throw new Error(
+        'The order must be completed with a delivered final copy. Refresh the order and try again.',
+      )
+    }
+    return { ok: true }
+  })
+
 export const requestRevision = createServerFn({ method: 'POST' })
   .middleware([requireUser])
   .validator(
@@ -328,36 +367,29 @@ export const requestRevision = createServerFn({ method: 'POST' })
     if (!order) throw new Error('Order not found.')
     const delivered = order.deliveredAt ?? order.updatedAt
     if (
-      order.status === 'completed' &&
+      (order.status === 'completed' || order.status === 'approved') &&
       Date.now() > delivered.getTime() + REVISION_WINDOW_DAYS * 86400000
     ) {
       throw new Error('The 14-day revision window has ended.')
     }
-    if (order.status !== 'draft-ready' && order.status !== 'completed') {
+    if (!revisionRequestStatuses.includes(order.status)) {
       throw new Error('Revisions open once your draft is delivered.')
     }
     await getDb().transaction(async (tx) => {
       const [updated] = await tx
         .update(orders)
         .set({ status: 'revision', updatedAt: new Date() })
-        .where(
-          and(
-            eq(orders.id, order.id),
-            inArray(orders.status, ['draft-ready', 'completed']),
-          ),
-        )
+        .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
         .returning({ id: orders.id })
       if (!updated)
         throw new Error(
           'An order update is already in progress. Refresh and try again.',
         )
-      await tx
-        .insert(orderMessages)
-        .values({
-          orderId: order.id,
-          sender: 'client',
-          body: `Revision request: ${data.notes}`,
-        })
+      await tx.insert(orderMessages).values({
+        orderId: order.id,
+        sender: 'client',
+        body: `Revision request: ${data.notes}`,
+      })
     })
     return { ok: true }
   })

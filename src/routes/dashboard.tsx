@@ -13,7 +13,29 @@ import { getMyDisplayName } from '@/lib/customers.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
 import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
-import { statusMeta } from '@/lib/orders'
+import { statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
+
+const orderGroupLabels = {
+  'awaiting-payment': 'Orders awaiting payment',
+  'in-progress': 'Orders in progress',
+  revision: 'Orders in revision',
+  completed: 'Completed orders',
+  approved: 'Approved orders',
+  cancelled: 'Cancelled orders',
+  other: 'Other orders',
+} as const
+
+const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
+  'awaiting-payment': 'awaiting-payment',
+  paid: 'in-progress',
+  'writer-assigned': 'in-progress',
+  'in-progress': 'in-progress',
+  'draft-ready': 'in-progress',
+  revision: 'revision',
+  completed: 'completed',
+  approved: 'approved',
+  cancelled: 'cancelled',
+}
 
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
@@ -168,29 +190,12 @@ function Dashboard() {
           </div>
           {selected ? (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <nav aria-label="Your orders" className="space-y-2">
-                {orders.map((item) => (
-                  <Link
-                    className={`block rounded-lg border p-3 text-sm ${item.code === selected.code ? 'border-primary bg-secondary' : 'bg-card'}`}
-                    key={item.code}
-                    to="/dashboard"
-                    search={{ order: item.code }}
-                    aria-current={
-                      item.code === selected.code ? 'true' : undefined
-                    }
-                  >
-                    <span className="block font-semibold">
-                      {item.code} ·{' '}
-                      {statusMeta[item.status]?.label ?? item.status}
-                    </span>
-                    <span className="block break-words">{item.title}</span>
-                  </Link>
-                ))}
-              </nav>
+              <CustomerOrderList orders={orders} selected={selected.code} />
               <OrderPanel
                 key={selected.code}
                 order={selected}
                 checkout={checkout}
+                allowApproval={!user.isAdmin}
               />
             </div>
           ) : (
@@ -201,5 +206,48 @@ function Dashboard() {
         </>
       )}
     </PortalShell>
+  )
+}
+
+function CustomerOrderList({
+  orders,
+  selected,
+}: {
+  orders: OrderView[]
+  selected: string
+}) {
+  const groups = Object.entries(orderGroupLabels)
+    .map(([key, label]) => ({
+      label,
+      orders: orders.filter(
+        (item) => (orderGroupByStatus[item.status] ?? 'other') === key,
+      ),
+    }))
+    .filter((group) => group.orders.length > 0)
+
+  return (
+    <nav aria-label="Your orders" className="space-y-5">
+      {groups.map((group) => (
+        <div key={group.label} className="space-y-2">
+          <h3 className="text-sm font-sans font-semibold tracking-normal">
+            {group.label}
+          </h3>
+          {group.orders.map((item) => (
+            <Link
+              className={`block rounded-lg border p-3 text-sm ${item.code === selected ? 'border-primary bg-secondary' : 'bg-card'}`}
+              key={item.code}
+              to="/dashboard"
+              search={{ order: item.code }}
+              aria-current={item.code === selected ? 'true' : undefined}
+            >
+              <span className="block font-semibold">
+                {item.code} · {statusMeta[item.status]?.label ?? item.status}
+              </span>
+              <span className="block break-words">{item.title}</span>
+            </Link>
+          ))}
+        </div>
+      ))}
+    </nav>
   )
 }

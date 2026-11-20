@@ -65,7 +65,7 @@ export const orderFiles = pgTable(
     orderId: integer('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
-    kind: text().notNull(), // 'brief' | 'paper' | 'final' | 'report' | 'material'
+    kind: text().notNull(), // FileKind in src/lib/orders.ts
     name: text().notNull(),
     size: integer().notNull(),
     contentType: text('content_type').notNull(),

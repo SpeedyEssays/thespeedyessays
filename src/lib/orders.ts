@@ -9,6 +9,7 @@ export const orderStatuses = [
   'draft-ready',
   'revision',
   'completed',
+  'approved',
   'cancelled',
 ] as const
 
@@ -18,13 +19,14 @@ export const statusMeta: Record<
   OrderStatus,
   { label: string; tone: 'muted' | 'info' | 'warn' | 'ok'; progress: number }
 > = {
-  'awaiting-payment': { label: 'Order received', tone: 'warn', progress: 5 },
+  'awaiting-payment': { label: 'Awaiting payment', tone: 'warn', progress: 5 },
   paid: { label: 'Paid', tone: 'ok', progress: 10 },
   'writer-assigned': { label: 'Writer assigned', tone: 'info', progress: 20 },
   'in-progress': { label: 'In progress', tone: 'info', progress: 55 },
   'draft-ready': { label: 'Draft ready', tone: 'info', progress: 80 },
   revision: { label: 'In revision', tone: 'warn', progress: 85 },
   completed: { label: 'Completed', tone: 'ok', progress: 100 },
+  approved: { label: 'Approved', tone: 'ok', progress: 100 },
   cancelled: { label: 'Cancelled', tone: 'muted', progress: 0 },
 }
 
@@ -36,26 +38,33 @@ export const orderTimeline: { status: OrderStatus; label: string }[] = [
   { status: 'completed', label: 'Delivered' },
 ]
 
-export const fileKinds = [
-  'brief',
-  'paper',
+export const staffFileKinds = [
   'final',
+  'paper',
+  'soft-copy',
   'report',
   'material',
 ] as const
+export const fileKinds = ['brief', ...staffFileKinds] as const
 export type FileKind = (typeof fileKinds)[number]
 
 export const fileKindLabels: Record<FileKind, string> = {
   brief: 'Customer brief',
   paper: 'Draft',
   final: 'Final copy',
+  'soft-copy': 'Soft copy',
   report: 'Originality report',
-  material: 'Supporting material',
+  material: 'Supporting file',
 }
 
-export function canCustomerReadFile(kind: string, deliveredAt: Date | string | null) {
-  return kind !== 'final' || Boolean(deliveredAt)
+export function canCustomerReadFile(
+  kind: string,
+  deliveredAt: Date | string | null,
+) {
+  return (kind !== 'final' && kind !== 'soft-copy') || Boolean(deliveredAt)
 }
+
+export const revisionRequestStatuses = ['draft-ready', 'completed', 'approved']
 
 export function canCheckout(order: {
   status: string
@@ -111,6 +120,7 @@ export type OrderView = {
   price: number
   paymentMethod: string
   paidAt: string | null
+  deliveredAt: string | null
   checkoutStarted: boolean
   status: OrderStatus
   originalityScore: number | null

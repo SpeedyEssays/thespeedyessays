@@ -36,6 +36,7 @@ function toView(row: OrderRow, files: FileRow[], staff = false): OrderView {
     paymentMethod: row.paymentMethod,
     checkoutStarted: !!row.paymentReference,
     paidAt: row.paidAt?.toISOString() ?? null,
+    deliveredAt: row.deliveredAt?.toISOString() ?? null,
     status: row.status as OrderStatus,
     originalityScore: row.originalityScore,
     instructions: row.instructions,

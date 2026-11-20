@@ -25,8 +25,11 @@ export const uploadOrderFile = createServerFn({ method: 'POST' })
     if (data.kind !== 'brief' && !context.user.isAdmin) {
       throw new Error('Only staff can upload deliverables.')
     }
-    if (!context.user.isAdmin && order.status === 'completed') {
-      throw new Error('Message support to add files to a completed order.')
+    if (
+      !context.user.isAdmin &&
+      ['completed', 'approved'].includes(order.status)
+    ) {
+      throw new Error('Message support to add files to a delivered order.')
     }
     const blobKey = `${order.id}/${data.kind}/${data.uploadId}`
     const bytes = await data.file.arrayBuffer()
