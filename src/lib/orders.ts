@@ -3,6 +3,7 @@
 
 export const orderStatuses = [
   'awaiting-payment',
+  'paid',
   'writer-assigned',
   'in-progress',
   'draft-ready',
@@ -15,6 +16,7 @@ export type OrderStatus = (typeof orderStatuses)[number]
 
 export const statusMeta: Record<OrderStatus, { label: string; tone: 'muted' | 'info' | 'warn' | 'ok'; progress: number }> = {
   'awaiting-payment': { label: 'Awaiting payment', tone: 'warn', progress: 5 },
+  paid: { label: 'Paid', tone: 'ok', progress: 10 },
   'writer-assigned': { label: 'Writer assigned', tone: 'info', progress: 20 },
   'in-progress': { label: 'In progress', tone: 'info', progress: 55 },
   'draft-ready': { label: 'Draft ready', tone: 'info', progress: 80 },
@@ -31,10 +33,10 @@ export const orderTimeline: { status: OrderStatus; label: string }[] = [
   { status: 'completed', label: 'Delivered' },
 ]
 
-export const fileKinds = ['brief', 'paper', 'report'] as const
+export const fileKinds = ['brief', 'paper', 'final', 'report'] as const
 export type FileKind = (typeof fileKinds)[number]
 
-export const MAX_FILE_BYTES = 25 * 1024 * 1024
+export const MAX_FILE_BYTES = 4 * 1024 * 1024
 export const REVISION_WINDOW_DAYS = 14
 
 const CODE_OFFSET = 48000
@@ -47,7 +49,7 @@ export function orderIdFromCode(code: string) {
   const match = /^SE-(\d+)$/.exec(code.trim().toUpperCase())
   if (!match) return null
   const id = Number(match[1]) - CODE_OFFSET
-  return id > 0 ? id : null
+  return Number.isSafeInteger(id) && id > 0 && id <= 2147483647 ? id : null
 }
 
 export function formatBytes(bytes: number) {
@@ -72,6 +74,8 @@ export type OrderView = {
   updatedAt: string
   price: number
   paymentMethod: string
+  paidAt: string | null
+  checkoutStarted: boolean
   status: OrderStatus
   originalityScore: number | null
   instructions: string
@@ -81,3 +85,11 @@ export type OrderView = {
 export type AdminOrderView = OrderView & { clientEmail: string; clientName: string | null; awaitingReply: boolean }
 
 export type OrderMessageView = { id: number; sender: 'client' | 'support'; body: string; at: string }
+
+export const allowedUploadExtensions = ['pdf', 'docx', 'pptx', 'txt', 'png', 'jpg', 'jpeg']
+export const orderFileAccept = allowedUploadExtensions.map((extension) => `.${extension}`).join(',')
+
+export function checkOrderFile(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return file.name.length <= 200 && file.size > 0 && file.size <= MAX_FILE_BYTES && allowedUploadExtensions.includes(extension)
+}

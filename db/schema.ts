@@ -9,6 +9,11 @@ export const orders = pgTable(
     userId: text('user_id').notNull(),
     clientEmail: text('client_email').notNull(),
     clientName: text('client_name'),
+    submissionId: uuid('submission_id').unique(),
+    paymentReference: text('payment_reference').unique(),
+    paymentUrl: text('payment_url'),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     type: text().notNull(),
     subject: text().notNull(),
     topic: text().notNull(),
@@ -37,11 +42,11 @@ export const orderFiles = pgTable(
     orderId: integer('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
-    kind: text().notNull(), // 'brief' | 'paper' | 'report'
+    kind: text().notNull(), // 'brief' | 'paper' | 'final' | 'report'
     name: text().notNull(),
     size: integer().notNull(),
     contentType: text('content_type').notNull(),
-    blobKey: text('blob_key').notNull(),
+    blobKey: text('blob_key').notNull().unique(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('order_files_order_id_idx').on(t.orderId)],

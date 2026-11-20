@@ -39,7 +39,7 @@ export const policies: Policy[] = [
       {
         heading: '4. How to request a refund',
         body: [
-          'Submit a refund request from your client dashboard within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence, such as your professor’s feedback or an originality report.',
+          'Send a refund request in the order’s message thread within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence, such as your professor’s feedback or an originality report.',
           'Our Quality Assurance team responds within 3 business days. You may be offered a free revision first, which you can accept or decline.',
         ],
       },
@@ -105,7 +105,7 @@ export const policies: Policy[] = [
       {
         heading: '3. Payment security',
         body: [
-          'All payments are processed by PCI-DSS Level 1 certified providers (Stripe and PayPal) over 256-bit SSL/TLS encryption. Our entire website is served over HTTPS.',
+          'Online payments are handled by the payment provider shown at checkout. We use HTTPS and do not collect your card number on this website.',
         ],
       },
       {

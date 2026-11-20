@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 
 import { Toaster } from '@/components/ui/sonner'
@@ -65,10 +66,27 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <TooltipProvider>{children}</TooltipProvider>
+        <IdentityEmailRedirect />
         <ChatWidget />
         <Toaster />
         <Scripts />
       </body>
     </html>
   )
+}
+
+function IdentityEmailRedirect() {
+  useEffect(() => {
+    const { pathname, hash } = window.location
+    if (['/order', '/dashboard', '/admin'].includes(pathname)) {
+      void import('@netlify/identity').then(({ getUser }) => getUser()).catch(() => {})
+    }
+    if (pathname === '/account') return
+    const params = new URLSearchParams(hash.slice(1))
+    if (['confirmation_token', 'recovery_token', 'invite_token', 'email_change_token', 'access_token'].some((key) => params.has(key))) {
+      window.location.replace(`/account${hash}`)
+    }
+  }, [])
+
+  return null
 }
