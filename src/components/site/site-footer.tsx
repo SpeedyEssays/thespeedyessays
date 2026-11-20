@@ -21,7 +21,7 @@ export function SiteFooter() {
           <h2 className="mb-3 font-sans text-sm font-semibold tracking-normal">Clients</h2>
           <ul className="space-y-2 text-sm text-primary-foreground/70">
             <li><Link to="/order" className="hover:text-primary-foreground">Place an order</Link></li>
-            <li><Link to="/dashboard" className="hover:text-primary-foreground">Client dashboard</Link></li>
+            <li><Link to="/dashboard" className="hover:text-primary-foreground">Customer portal</Link></li>
             <li><Link to="/samples" className="hover:text-primary-foreground">Sample papers</Link></li>
             <li><Link to="/" hash="pricing" className="hover:text-primary-foreground">Pricing</Link></li>
           </ul>

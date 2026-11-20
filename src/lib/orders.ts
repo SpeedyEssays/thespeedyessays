@@ -14,8 +14,11 @@ export const orderStatuses = [
 
 export type OrderStatus = (typeof orderStatuses)[number]
 
-export const statusMeta: Record<OrderStatus, { label: string; tone: 'muted' | 'info' | 'warn' | 'ok'; progress: number }> = {
-  'awaiting-payment': { label: 'Awaiting payment', tone: 'warn', progress: 5 },
+export const statusMeta: Record<
+  OrderStatus,
+  { label: string; tone: 'muted' | 'info' | 'warn' | 'ok'; progress: number }
+> = {
+  'awaiting-payment': { label: 'Order received', tone: 'warn', progress: 5 },
   paid: { label: 'Paid', tone: 'ok', progress: 10 },
   'writer-assigned': { label: 'Writer assigned', tone: 'info', progress: 20 },
   'in-progress': { label: 'In progress', tone: 'info', progress: 55 },
@@ -33,9 +36,35 @@ export const orderTimeline: { status: OrderStatus; label: string }[] = [
   { status: 'completed', label: 'Delivered' },
 ]
 
-export const fileKinds = ['brief', 'paper', 'final', 'report'] as const
+export const fileKinds = [
+  'brief',
+  'paper',
+  'final',
+  'report',
+  'material',
+] as const
 export type FileKind = (typeof fileKinds)[number]
 
+export const fileKindLabels: Record<FileKind, string> = {
+  brief: 'Customer brief',
+  paper: 'Draft',
+  final: 'Final copy',
+  report: 'Originality report',
+  material: 'Supporting material',
+}
+
+export function canCustomerReadFile(kind: string, deliveredAt: Date | string | null) {
+  return kind !== 'final' || Boolean(deliveredAt)
+}
+
+export function canCheckout(order: {
+  status: string
+  paidAt: Date | string | null
+}) {
+  return !order.paidAt && order.status !== 'cancelled'
+}
+
+export const MAX_ORDER_FILES_PER_UPLOAD = 8
 export const MAX_FILE_BYTES = 4 * 1024 * 1024
 export const REVISION_WINDOW_DAYS = 14
 
@@ -57,7 +86,13 @@ export function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export type OrderFileView = { id: number; kind: FileKind; name: string; size: number; createdAt: string }
+export type OrderFileView = {
+  id: number
+  kind: FileKind
+  name: string
+  size: number
+  createdAt: string
+}
 
 export type OrderView = {
   id: number
@@ -70,6 +105,7 @@ export type OrderView = {
   sources: number
   pages: number
   dueAt: string
+  agreedDueAt: string | null
   placedAt: string
   updatedAt: string
   price: number
@@ -82,14 +118,64 @@ export type OrderView = {
   files: OrderFileView[]
 }
 
-export type AdminOrderView = OrderView & { clientEmail: string; clientName: string | null; awaitingReply: boolean }
+export type AdminOrderView = OrderView & {
+  clientId: string
+  clientEmail: string
+  clientName: string | null
+  awaitingReply: boolean
+  detailsRevision: number
+}
 
-export type OrderMessageView = { id: number; sender: 'client' | 'support'; body: string; at: string }
+export type OrderMessageView = {
+  id: number
+  sender: 'client' | 'support'
+  body: string
+  at: string
+}
 
-export const allowedUploadExtensions = ['pdf', 'docx', 'pptx', 'txt', 'png', 'jpg', 'jpeg']
-export const orderFileAccept = allowedUploadExtensions.map((extension) => `.${extension}`).join(',')
+const allowedUploadExtensions = [
+  'pdf',
+  'doc',
+  'docx',
+  'odt',
+  'rtf',
+  'txt',
+  'md',
+  'ppt',
+  'pptx',
+  'odp',
+  'xls',
+  'xlsx',
+  'ods',
+  'csv',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'tif',
+  'tiff',
+  'heic',
+  'mp3',
+  'm4a',
+  'wav',
+  'mp4',
+  'mov',
+  'webm',
+  'zip',
+  '7z',
+  'rar',
+]
+export const orderFileAccept = allowedUploadExtensions
+  .map((extension) => `.${extension}`)
+  .join(',')
 
 export function checkOrderFile(file: File) {
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-  return file.name.length <= 200 && file.size > 0 && file.size <= MAX_FILE_BYTES && allowedUploadExtensions.includes(extension)
+  const extension = /\.([a-z0-9]+)$/i.exec(file.name)?.[1].toLowerCase() ?? ''
+  return (
+    file.name.length <= 200 &&
+    file.size > 0 &&
+    file.size <= MAX_FILE_BYTES &&
+    allowedUploadExtensions.includes(extension)
+  )
 }

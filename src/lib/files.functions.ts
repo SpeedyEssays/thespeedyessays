@@ -20,9 +20,13 @@ export const uploadOrderFile = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
-    if (order.status === 'cancelled') throw new Error('This order was cancelled.')
-    if (data.kind !== 'brief' && (!context.user.isAdmin || !order.paidAt)) {
-      throw new Error('Only staff can upload deliverables for paid orders.')
+    if (order.status === 'cancelled')
+      throw new Error('This order was cancelled.')
+    if (data.kind !== 'brief' && !context.user.isAdmin) {
+      throw new Error('Only staff can upload deliverables.')
+    }
+    if (!context.user.isAdmin && order.status === 'completed') {
+      throw new Error('Message support to add files to a completed order.')
     }
     const blobKey = `${order.id}/${data.kind}/${data.uploadId}`
     const bytes = await data.file.arrayBuffer()
@@ -33,7 +37,9 @@ export const uploadOrderFile = createServerFn({ method: 'POST' })
     if (!saved) {
       const existing = await readOrderFile(blobKey)
       if (!existing || !Buffer.from(existing).equals(Buffer.from(bytes))) {
-        throw new Error('This upload was already used for a different file. Select it again.')
+        throw new Error(
+          'This upload was already used for a different file. Select it again.',
+        )
       }
     }
     await getDb()

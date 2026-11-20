@@ -10,11 +10,12 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { PageShell } from '@/components/site/page-shell'
+import { PortalShell } from '@/components/portal-shell'
 import { getServerUser } from '@/lib/identity.functions'
 import { uploadOrderFile } from '@/lib/files.functions'
 import { createOrder } from '@/lib/orders.functions'
-import { checkOrderFile, orderFileAccept } from '@/lib/orders'
+import { isCheckoutAvailable } from '@/lib/payments.functions'
+import { checkOrderFile, MAX_ORDER_FILES_PER_UPLOAD, orderFileAccept } from '@/lib/orders'
 import {
   academicLevels,
   assignmentTypes,
@@ -42,6 +43,7 @@ export const Route = createFileRoute('/order')({
     if (!user) throw redirect({ to: '/account', search: { next: location.href } })
     return { user }
   },
+  loader: () => isCheckoutAvailable(),
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({ meta: [{ title: 'Place an order — SpeedyEssays' }] }),
   component: OrderPage,
@@ -68,6 +70,7 @@ type FormState = {
 
 function OrderPage() {
   const search = Route.useSearch()
+  const checkout = Route.useLoaderData()
   const [step, setStep] = useState(0)
   const { user } = Route.useRouteContext()
   const [placed, setPlaced] = useState<{ code: string; failedFiles: string[] } | null>(null)
@@ -112,7 +115,7 @@ function OrderPage() {
   }
 
   function addFiles(files: File[]) {
-    if (files.some((file) => !checkOrderFile(file)) || form.files.length + files.length > 8) {
+    if (files.some((file) => !checkOrderFile(file)) || form.files.length + files.length > MAX_ORDER_FILES_PER_UPLOAD) {
       toast.error('Choose up to eight supported files, no larger than 4 MB each.')
       return
     }
@@ -168,14 +171,14 @@ function OrderPage() {
 
   if (placed) {
     return (
-      <PageShell>
+      <PortalShell>
         <div className="mx-auto max-w-reading px-4 py-20 text-center sm:px-6">
           <CheckCircle2 className="mx-auto size-14 text-success" />
           <h1 className="mt-6 text-4xl font-semibold">Order {placed.code} saved</h1>
           <p className="mt-4 text-muted-foreground">
-            Open your order in the dashboard to continue to payment.
+            Open your order in the customer portal to view its status, messages and files.
           </p>
-          {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them in your dashboard before paying. {placed.failedFiles.join(', ')}</p>}
+          {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them from the order in your customer portal. {placed.failedFiles.join(', ')}</p>}
           <div className="mt-8 flex justify-center gap-3">
             <Button asChild>
               <Link to="/dashboard" search={{ order: placed.code }}>Open my order</Link>
@@ -185,12 +188,12 @@ function OrderPage() {
             </Button>
           </div>
         </div>
-      </PageShell>
+      </PortalShell>
     )
   }
 
   return (
-    <PageShell>
+    <PortalShell>
       <div className="paper-grain border-b">
         <div className="mx-auto max-w-content px-4 py-10 sm:px-6">
           <h1 className="text-3xl font-semibold sm:text-4xl">Place your order</h1>
@@ -407,7 +410,7 @@ function OrderPage() {
                 >
                   <FileUp className="size-8 text-muted-foreground" />
                   <span className="mt-3 text-sm font-medium">Drag files here or click to browse</span>
-                  <span className="mt-1 text-xs text-muted-foreground">PDF, DOCX, PPTX, TXT, PNG or JPEG · up to 4 MB each</span>
+                  <span className="mt-1 text-xs text-muted-foreground">Documents, spreadsheets, images, media and archives · up to 4 MB each</span>
                   <input
                     id="files"
                     type="file"
@@ -452,7 +455,10 @@ function OrderPage() {
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
                 <Summary label="Attachments" value={form.files.length ? `${form.files.length} file(s)` : 'None'} />
               </dl>
-              <p className="text-sm">Ordering as <span className="font-medium">{user.email}</span>. After saving your order, open it in your dashboard to pay.</p>
+              <p className="text-sm">
+                Ordering as <span className="font-medium">{user.email}</span>.{' '}
+                {checkout ? 'Open the saved order to check out.' : 'You can view the order and contact support after placing it.'}
+              </p>
               <div>
                 <Label htmlFor="agree" className="flex items-start gap-3 font-normal">
                   <Checkbox id="agree" checked={form.agree} onCheckedChange={(c) => set('agree', c === true)} aria-invalid={!!errors.agree} />
@@ -475,7 +481,7 @@ function OrderPage() {
             <Button type="submit" size="lg" disabled={busy}>
               {step === steps.length - 1 ? (
                 <>
-                  {busy ? 'Saving order…' : 'Save order'}
+                  {busy ? 'Placing order…' : 'Place order'}
                 </>
               ) : (
                 <>
@@ -503,7 +509,7 @@ function OrderPage() {
           </div>
         </aside>
       </div>
-    </PageShell>
+    </PortalShell>
   )
 }
 

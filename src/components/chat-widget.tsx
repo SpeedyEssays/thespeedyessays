@@ -7,6 +7,18 @@ import { readVisitorChat, sendVisitorChat } from '@/lib/chat.functions'
 const load = () => readVisitorChat()
 const send = (body: string) => sendVisitorChat({ data: { body } })
 
+export function SupportChat() {
+  return (
+    <ChatThread
+      load={load}
+      send={send}
+      ownSender="visitor"
+      otherLabel="SpeedyEssays support"
+      emptyText="Send us a message here. Check this chat for our reply."
+    />
+  )
+}
+
 export function ChatWidget() {
   const [open, setOpen] = useState(false)
   return (
@@ -18,13 +30,7 @@ export function ChatWidget() {
           className="mb-3 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-card p-4 shadow-xl"
         >
           <h2 className="mb-3 text-lg font-semibold">Support chat</h2>
-          <ChatThread
-            load={load}
-            send={send}
-            ownSender="visitor"
-            otherLabel="SpeedyEssays support"
-            emptyText="Send us a message here. Check this chat for our reply."
-          />
+          <SupportChat />
         </aside>
       )}
       <Button
@@ -33,7 +39,8 @@ export function ChatWidget() {
         aria-controls={open ? 'support-chat' : undefined}
         onClick={() => setOpen(!open)}
       >
-        {open ? <X /> : <MessageCircle />} {open ? 'Close chat' : 'Chat with support'}
+        {open ? <X /> : <MessageCircle />}{' '}
+        {open ? 'Close chat' : 'Chat with support'}
       </Button>
     </div>
   )

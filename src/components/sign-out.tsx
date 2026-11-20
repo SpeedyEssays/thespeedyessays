@@ -1,9 +1,20 @@
 import { useState } from 'react'
+import { useSupabase } from '@/lib/supabase-config'
 import { logout } from '@/lib/account-client'
 import { Button } from '@/components/ui/button'
 
 export function SignOut() {
   const [error, setError] = useState(false)
+  if (useSupabase) {
+    return (
+      <form method="post" action="/api/sign-out">
+        <Button variant="ghost" type="submit">
+          Sign out
+        </Button>
+      </form>
+    )
+  }
+
   return (
     <div>
       <Button

@@ -4,7 +4,7 @@ This deployment uses the same SpeedyEssays application as the Netlify preview. T
 
 ## Configure a new destination
 
-1. Create a Supabase project. Apply the two existing `netlify/database/migrations` SQL files in timestamp order on an empty database, then apply [supabase-access.sql](./supabase-access.sql). The last step prevents anonymous and signed-in Supabase API users from querying application tables. Keep the database connection and maintenance credentials private.
+1. Create a Supabase project. Apply the `netlify/database/migrations` SQL files in timestamp order on an empty database, then apply [supabase-access.sql](./supabase-access.sql). The last step prevents anonymous and signed-in Supabase API users from querying application tables. Keep the database connection and maintenance credentials private.
 2. Create a private bucket named `order-files`. Leave public access off and set its maximum file size to 4 MB. Keep the storage secret on the application server.
 3. In Supabase Auth, set the Site URL to the actual website origin and allow `/account` and `/account?recovery=true` as redirect URLs. Enable email confirmation and configure a custom SMTP sender for public registration. With the default templates, the customer needs to open the confirmation or recovery link in the browser that started the flow.
 
@@ -40,6 +40,12 @@ Use Node.js 24 and pnpm to run the same app on a host such as Render. The build 
 The service listens on `0.0.0.0` at the host's `PORT` (3000 locally). On Render, use a Web Service and set `SKIP_INSTALL_DEPS=true` to use the explicit install command above. The free instance is for testing and sleeps after inactivity. The database and order files live in Supabase.
 
 For either host, set the Paystack webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash. Use test keys for verification. Complete the payment provider's business approval before switching to live mode.
+
+## Portal entry points
+
+- Customers sign in through the Customer portal and use `/dashboard` for their orders and live support.
+- Staff use `/admin` and an account with the server-managed `admin` role. The Website chat inbox handles both guests and account holders. Open a customer from Customers to update their display name or support notes, find orders, or start a chat.
+- Staff can deliver drafts, final copies, originality reports and supporting materials from an order. Final copies appear to the customer after staff marks the order delivered. Uploads accept up to eight files at a time, 4 MB per file.
 
 ## Migrate data and verify the cutover
 

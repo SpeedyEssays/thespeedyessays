@@ -36,7 +36,7 @@ export function SiteHeader() {
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           <Button variant="ghost" asChild>
-            <Link to="/dashboard">Sign in</Link>
+            <Link to="/dashboard">Customer portal</Link>
           </Button>
           <Button variant="ghost" asChild>
             <Link to="/account" search={{ signup: true }}>Sign up</Link>
@@ -56,7 +56,7 @@ export function SiteHeader() {
             <SheetDescription className="sr-only">Site navigation</SheetDescription>
             <nav className="mt-4 flex flex-col gap-4 text-base font-medium">
               <NavLinks />
-              <Link to="/dashboard">Client dashboard</Link>
+              <Link to="/dashboard">Customer portal</Link>
               <Link to="/account" search={{ signup: true }}>Sign up</Link>
               <Button asChild className="mt-2">
                 <Link to="/order">Order now</Link>

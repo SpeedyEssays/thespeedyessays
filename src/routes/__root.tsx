@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRoute, useLocation } from '@tanstack/react-router'
 
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -61,6 +61,11 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const showPublicChat = useLocation({
+    select: ({ pathname, search }) =>
+      pathname !== '/admin' && pathname !== '/dashboard' &&
+      !(pathname === '/account' && 'next' in search && typeof search.next === 'string' && /^\/admin(?:\?|$)/.test(search.next)),
+  })
   return (
     <html lang="en">
       <head>
@@ -69,7 +74,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body>
         <TooltipProvider>{children}</TooltipProvider>
         <IdentityEmailRedirect />
-        <ChatWidget />
+        {showPublicChat && <ChatWidget />}
         <Toaster />
         <Scripts />
       </body>

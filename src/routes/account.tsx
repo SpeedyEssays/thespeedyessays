@@ -19,23 +19,41 @@ import { Label } from '@/components/ui/label'
 type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'invite'
 
 function accountDestination(next: unknown) {
-  if (typeof next !== 'string' || !/^\/(dashboard|order|admin)(?:\?|$)/.test(next)) return '/dashboard'
+  if (
+    typeof next !== 'string' ||
+    !/^\/(dashboard|order|admin)(?:\?|$)/.test(next)
+  )
+    return '/dashboard'
   return next
 }
 
 export const Route = createFileRoute('/account')({
-  validateSearch: (search: Record<string, unknown>): { next?: string; signup?: boolean } => ({
-    next: typeof search.next === 'string' ? accountDestination(search.next) : undefined,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { next?: string; signup?: boolean; denied?: boolean } => ({
+    next:
+      typeof search.next === 'string'
+        ? accountDestination(search.next)
+        : undefined,
     signup: search.signup === true ? true : undefined,
+    denied: search.denied === true ? true : undefined,
   }),
-  head: () => ({ meta: [{ title: 'Your account — SpeedyEssays' }, { name: 'robots', content: 'noindex' }] }),
-  remountDeps: ({ search }) => search.signup,
+  head: () => ({
+    meta: [
+      { title: 'Your account — SpeedyEssays' },
+      { name: 'robots', content: 'noindex' },
+    ],
+  }),
+  remountDeps: ({ search }) => [search.signup, search.next],
   component: Account,
 })
 
 function Account() {
-  const { next = '/dashboard', signup: startSignup } = Route.useSearch()
-  const [mode, setMode] = useState<Mode>(startSignup ? 'signup' : 'login')
+  const { next = '/dashboard', signup: startSignup, denied } = Route.useSearch()
+  const staff = /^\/admin(?:\?|$)/.test(next)
+  const [mode, setMode] = useState<Mode>(
+    startSignup && !staff ? 'signup' : 'login',
+  )
   const [pending, setPending] = useState(false)
   const [ready, setReady] = useState(false)
   const [problem, setProblem] = useState('')
@@ -57,7 +75,9 @@ function Account() {
             }
           })
           .catch(() => {
-            setProblem('This account link could not be verified. Check whether it has expired and try signing in.')
+            setProblem(
+              'This account link could not be verified. Check whether it has expired and try signing in.',
+            )
             setReady(true)
           })
         return
@@ -76,7 +96,11 @@ function Account() {
         setReady(true)
         return
       }
-      if (!hash.has('confirmation_token') && !hash.has('access_token') && !hash.has('email_change_token')) {
+      if (
+        !hash.has('confirmation_token') &&
+        !hash.has('access_token') &&
+        !hash.has('email_change_token')
+      ) {
         setReady(true)
         return
       }
@@ -115,7 +139,9 @@ function Account() {
         setNotice('Check your email for a confirmation link, then sign in.')
       } else if (mode === 'forgot') {
         await requestPasswordRecovery(email.trim())
-        setNotice('If this email has an account, you’ll receive a password reset link.')
+        setNotice(
+          'If this email has an account, you’ll receive a password reset link.',
+        )
       } else {
         if (mode === 'reset') await recoverPassword(token, password)
         else if (mode === 'invite') await acceptInvite(token, password)
@@ -134,7 +160,7 @@ function Account() {
   }
 
   const title = {
-    login: 'Sign in',
+    login: staff ? 'Staff sign in' : 'Sign in',
     signup: 'Create an account',
     forgot: 'Reset your password',
     reset: 'Set a new password',
@@ -145,8 +171,18 @@ function Account() {
     <PageShell>
       <main className="mx-auto max-w-md px-4 py-14 sm:px-6">
         <h1 className="text-4xl font-semibold">{title}</h1>
+        {staff && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {denied
+              ? 'This account has customer access. Sign in with your staff account to continue.'
+              : 'Use your SpeedyEssays staff account.'}
+          </p>
+        )}
         {ready ? (
-          <form onSubmit={submit} className="mt-6 space-y-4 rounded-xl border bg-card p-6">
+          <form
+            onSubmit={submit}
+            className="mt-6 space-y-4 rounded-xl border bg-card p-6"
+          >
             {mode === 'signup' && (
               <div className="space-y-2">
                 <Label htmlFor="account-name">Full name</Label>
@@ -178,7 +214,9 @@ function Account() {
                 <Label htmlFor="account-password">Password</Label>
                 <Input
                   id="account-password"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  autoComplete={
+                    mode === 'login' ? 'current-password' : 'new-password'
+                  }
                   type="password"
                   value={password}
                   minLength={mode === 'login' ? undefined : 8}
@@ -198,26 +236,42 @@ function Account() {
               </p>
             )}
             <Button className="w-full" disabled={pending}>
-              {pending ? 'Please wait…' : mode === 'forgot' ? 'Send reset link' : title}
+              {pending
+                ? 'Please wait…'
+                : mode === 'forgot'
+                  ? 'Send reset link'
+                  : title}
             </Button>
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
               {mode !== 'login' && (
-                <button type="button" className="underline" onClick={() => switchMode('login')}>
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => switchMode('login')}
+                >
                   Sign in
                 </button>
               )}
-              {mode === 'login' && (
-                <button type="button" className="underline" onClick={() => switchMode('signup')}>
+              {mode === 'login' && !staff && (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => switchMode('signup')}
+                >
                   Create an account
                 </button>
               )}
               {mode === 'login' && (
-                <button type="button" className="underline" onClick={() => switchMode('forgot')}>
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => switchMode('forgot')}
+                >
                   Forgot password?
                 </button>
               )}
-              <Link to="/" className="underline">
-                Home
+              <Link to={staff ? '/dashboard' : '/'} className="underline">
+                {staff ? 'Customer portal' : 'Home'}
               </Link>
             </div>
           </form>

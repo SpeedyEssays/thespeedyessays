@@ -29,7 +29,10 @@ if (
 const servePublic = serveStatic({
   dir: fileURLToPath(new URL("../dist/client/", import.meta.url)),
 });
-const database = { DATABASE_URL: process.env.DATABASE_URL };
+const database = {
+  DATABASE_URL: process.env.DATABASE_URL,
+  REUSE_DATABASE_CONNECTIONS: true,
+};
 
 serve({
   hostname: "0.0.0.0",

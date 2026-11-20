@@ -3,10 +3,14 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../../db'
 import { orderFiles, orders } from '../../db/schema'
 import { streamOrderFile } from '@/lib/files.server'
+import { canCustomerReadFile } from '@/lib/orders'
 import { readSessionUser } from '@/lib/session.server'
 
 function fileNotFound() {
-  return new Response('File not found.', { status: 404, headers: { 'Cache-Control': 'private, no-store' } })
+  return new Response('File not found.', {
+    status: 404,
+    headers: { 'Cache-Control': 'private, no-store' },
+  })
 }
 
 export const Route = createFileRoute('/api/files/$id')({
@@ -19,14 +23,19 @@ export const Route = createFileRoute('/api/files/$id')({
           return fileNotFound()
         }
         const [record] = await getDb()
-          .select({ file: orderFiles, owner: orders.userId, deliveredAt: orders.deliveredAt })
+          .select({
+            file: orderFiles,
+            owner: orders.userId,
+            deliveredAt: orders.deliveredAt,
+          })
           .from(orderFiles)
           .innerJoin(orders, eq(orderFiles.orderId, orders.id))
           .where(eq(orderFiles.id, id))
         if (
           !record ||
           (!user.isAdmin &&
-            (record.owner !== user.id || (record.file.kind === 'final' && !record.deliveredAt)))
+            (record.owner !== user.id ||
+              !canCustomerReadFile(record.file.kind, record.deliveredAt)))
         ) {
           return fileNotFound()
         }
