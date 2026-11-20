@@ -22,6 +22,7 @@ import {
 import { getServerUser } from '@/lib/identity.functions'
 import { statusMeta, type AdminOrderView } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
+import { supportNameRequired } from '@/lib/support-name'
 import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
@@ -56,7 +57,7 @@ export const Route = createFileRoute('/admin')({
     if (search.tab === 'admins' && !user.canManageStaff) {
       throw redirect({ to: '/admin', search: { tab: 'chat' } })
     }
-    return { canManageStaff: user.canManageStaff }
+    return { canManageStaff: user.canManageStaff, supportName: user.supportName }
   },
   loaderDeps: ({ search }) => ({ tab: search.tab, customer: search.customer }),
   loader: ({ deps }) =>
@@ -76,10 +77,17 @@ export const Route = createFileRoute('/admin')({
 function Admin() {
   const { tab = 'chat', customer, chat } = Route.useSearch()
   const orders = Route.useLoaderData()
-  const { canManageStaff } = Route.useRouteContext()
+  const { canManageStaff, supportName } = Route.useRouteContext()
   return (
     <PortalShell>
-      <h1 className="mb-5 text-4xl font-semibold">Staff portal</h1>
+      <header className="mb-5">
+        <h1 className="text-4xl font-semibold">Staff portal</h1>
+        {supportName && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Replying as {supportName} Support
+          </p>
+        )}
+      </header>
       <nav
         className="mb-6 flex flex-wrap gap-2 border-b pb-3"
         aria-label="Staff portal"
@@ -118,6 +126,7 @@ function StaffOrders({
   customer?: string
 }) {
   const { order: selected } = Route.useSearch()
+  const { supportName } = Route.useRouteContext()
   const router = useRouter()
   const [notice, setNotice] = useState('')
   const [error, setError] = useState(false)
@@ -232,7 +241,11 @@ function StaffOrders({
                 }}
               />
             )}
-            <OrderPanel order={order} staff />
+            <OrderPanel
+              order={order}
+              staff
+              replyNotice={supportName ? undefined : supportNameRequired}
+            />
           </div>
         </div>
       ) : (
@@ -351,6 +364,7 @@ function SupportConversation({
   id: string
   customer: boolean
 }) {
+  const { supportName } = Route.useRouteContext()
   const load = useCallback(() => readSupportChat({ data: { id } }), [id])
   const send = useCallback(
     (body: string) => sendSupportChat({ data: { id, body } }),
@@ -361,8 +375,10 @@ function SupportConversation({
       load={load}
       send={send}
       ownSender="agent"
+      ownLabel="Support"
       otherLabel={customer ? 'Customer' : 'Visitor'}
       emptyText="No messages yet."
+      replyNotice={supportName ? undefined : supportNameRequired}
     />
   )
 }

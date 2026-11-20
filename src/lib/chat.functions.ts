@@ -12,6 +12,7 @@ import {
 import { findCustomerAccount } from './customers.server'
 import { requireAdmin } from './identity.functions'
 import { readSessionUser, supportChatCookie } from './session.server'
+import { supportNameRequired } from './support-name'
 
 const messageInput = z.object({ body: z.string().trim().min(1).max(3000) })
 const staffThread = z.object({ id: z.uuid() })
@@ -27,6 +28,7 @@ async function messagesFor(conversationId: string, guestOnly = false) {
     .select({
       id: chatMessages.id,
       sender: chatMessages.sender,
+      supportName: chatMessages.supportName,
       body: chatMessages.body,
       at: chatMessages.createdAt,
     })
@@ -243,7 +245,9 @@ export const readSupportChat = createServerFn({ method: 'GET' })
 export const sendSupportChat = createServerFn({ method: 'POST' })
   .middleware([requireAdmin])
   .validator(staffThread.extend(messageInput.shape))
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
+    const { supportName } = context.user
+    if (!supportName) throw new Error(supportNameRequired)
     await getDb().transaction(async (tx) => {
       const [conversation] = await tx
         .update(chatConversations)
@@ -253,7 +257,12 @@ export const sendSupportChat = createServerFn({ method: 'POST' })
       if (!conversation) throw new Error('Conversation not found.')
       await tx
         .insert(chatMessages)
-        .values({ conversationId: data.id, sender: 'agent', body: data.body })
+        .values({
+          conversationId: data.id,
+          sender: 'agent',
+          body: data.body,
+          supportName,
+        })
     })
     return { ok: true }
   })

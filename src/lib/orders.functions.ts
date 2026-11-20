@@ -24,6 +24,7 @@ import {
   estimatePrice,
   formattingStyles,
 } from './pricing'
+import { supportNameRequired } from './support-name'
 
 const levelIds = academicLevels.map((l) => l.id) as [string, ...string[]]
 const deadlineIds = deadlines.map((d) => d.id) as [string, ...string[]]
@@ -254,6 +255,7 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
       await tx.insert(orderMessages).values({
         orderId: order.id,
         sender: 'support',
+        supportName: context.user.supportName,
         body: `Support updated the order: ${changed.join(', ')}. See Order details for the current brief.`,
       })
     })
@@ -275,6 +277,7 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
     return rows.reverse().map((m) => ({
       id: m.id,
       sender: m.sender as OrderMessageView['sender'],
+      supportName: m.supportName,
       body: m.body,
       at: m.createdAt.toISOString(),
     }))
@@ -292,6 +295,8 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     if (data.asSupport && !context.user.isAdmin)
       throw new Error('Admin access required.')
+    const supportName = data.asSupport ? context.user.supportName : null
+    if (data.asSupport && !supportName) throw new Error(supportNameRequired)
     const order = await findAccessibleOrder(data.code, {
       ...context.user,
       isAdmin: data.asSupport === true,
@@ -303,6 +308,7 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
         .values({
           orderId: order.id,
           sender: data.asSupport ? 'support' : 'client',
+          supportName,
           body: data.body,
         })
       await tx

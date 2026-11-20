@@ -35,11 +35,13 @@ export function OrderPanel({
   staff = false,
   checkout = false,
   allowApproval = false,
+  replyNotice,
 }: {
   order: OrderView
   staff?: boolean
   checkout?: boolean
   allowApproval?: boolean
+  replyNotice?: string
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -428,8 +430,10 @@ export function OrderPanel({
           load={load}
           send={send}
           ownSender={staff ? 'support' : 'client'}
-          otherLabel={staff ? 'Customer' : 'SpeedyEssays support'}
+          ownLabel={staff ? 'Support' : 'You'}
+          otherLabel={staff ? 'Customer' : 'Support'}
           emptyText="No messages on this order yet."
+          replyNotice={replyNotice}
         />
       </section>
     </section>

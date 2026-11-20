@@ -139,6 +139,7 @@ export type AdminOrderView = OrderView & {
 export type OrderMessageView = {
   id: number
   sender: 'client' | 'support'
+  supportName: string | null
   body: string
   at: string
 }

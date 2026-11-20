@@ -86,6 +86,7 @@ export const orderMessages = pgTable(
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
     sender: text().notNull(), // 'client' | 'support'
+    supportName: text('support_name'),
     body: text().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -129,6 +130,7 @@ export const chatMessages = pgTable(
       .notNull()
       .references(() => chatConversations.id, { onDelete: 'cascade' }),
     sender: text().notNull(), // 'visitor' | 'agent'
+    supportName: text('support_name'),
     body: text().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

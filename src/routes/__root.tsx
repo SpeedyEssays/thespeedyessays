@@ -63,7 +63,8 @@ export const Route = createRootRoute({
 function RootDocument({ children }: { children: React.ReactNode }) {
   const showPublicChat = useLocation({
     select: ({ pathname, search }) =>
-      pathname !== '/admin' && pathname !== '/dashboard' &&
+      pathname !== '/admin' &&
+      !(pathname === '/dashboard' && 'tab' in search && search.tab === 'chat') &&
       !(pathname === '/account' && 'next' in search && typeof search.next === 'string' && /^\/admin(?:\?|$)/.test(search.next)),
   })
   return (

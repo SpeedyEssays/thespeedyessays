@@ -7,6 +7,7 @@ import {
 import { getUser as getNetlifyUser } from '@netlify/identity'
 import { createServerClient } from '@supabase/ssr'
 import { supabaseConfig, useSupabase } from './supabase-config'
+import { supportNameInput } from './support-name'
 
 export const supportChatCookie = 'se_support'
 
@@ -16,21 +17,26 @@ export type SessionUser = {
   email: string
   isAdmin: boolean
   canManageStaff: boolean
+  supportName: string | null
 }
 
 export async function readSessionUser(): Promise<SessionUser | null> {
   setResponseHeader('Cache-Control', 'private, no-store')
   if (!useSupabase) {
     const user = await getNetlifyUser()
-    return user
-      ? {
-          id: user.id,
-          name: user.name ?? null,
-          email: user.email ?? '',
-          isAdmin: !!user.roles?.includes('admin'),
-          canManageStaff: false,
-        }
-      : null
+    if (!user) return null
+    const isAdmin = !!user.roles?.includes('admin')
+    const supportName = supportNameInput.safeParse(
+      user.name?.trim().split(/\s+/, 1)[0],
+    )
+    return {
+      id: user.id,
+      name: user.name ?? null,
+      email: user.email ?? '',
+      isAdmin,
+      canManageStaff: false,
+      supportName: isAdmin && supportName.success ? supportName.data : null,
+    }
   }
 
   const auth = supabaseServerAuth()
@@ -40,6 +46,7 @@ export async function readSessionUser(): Promise<SessionUser | null> {
   const { id, email, user_metadata, app_metadata } = data.user
   const roles = Array.isArray(app_metadata.roles) ? app_metadata.roles : []
   const isAdmin = roles.includes('admin')
+  const supportName = supportNameInput.safeParse(app_metadata.support_name)
   return {
     id,
     email,
@@ -49,6 +56,7 @@ export async function readSessionUser(): Promise<SessionUser | null> {
         : null,
     isAdmin,
     canManageStaff: isAdmin && roles.includes('staff_manager'),
+    supportName: isAdmin && supportName.success ? supportName.data : null,
   }
 }
 
