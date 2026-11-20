@@ -4,10 +4,12 @@ import {
   acceptInvite,
   handleAuthCallback,
   login,
+  readSupabaseAccountLink,
   recoverPassword,
   requestPasswordRecovery,
   signup,
-} from '@netlify/identity'
+} from '@/lib/account-client'
+import { useSupabase } from '@/lib/supabase-config'
 
 import { PageShell } from '@/components/site/page-shell'
 import { Button } from '@/components/ui/button'
@@ -45,6 +47,21 @@ function Account() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (useSupabase) {
+        void readSupabaseAccountLink()
+          .then((result) => {
+            if (result === 'signed-in') window.location.replace(next)
+            else {
+              if (result === 'reset') setMode('reset')
+              setReady(true)
+            }
+          })
+          .catch(() => {
+            setProblem('This account link could not be verified. Check whether it has expired and try signing in.')
+            setReady(true)
+          })
+        return
+      }
       const hash = new URLSearchParams(window.location.hash.slice(1))
       const recovery = hash.get('recovery_token')
       const invitation = hash.get('invite_token')

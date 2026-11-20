@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { logout } from '@netlify/identity'
+import { logout } from '@/lib/account-client'
 import { Button } from '@/components/ui/button'
 
 export function SignOut() {

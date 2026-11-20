@@ -124,8 +124,7 @@ function Home() {
       <section className="mx-auto grid max-w-content items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2">
         <div className="relative">
           <img
-            src="/.netlify/images?url=/img/hero-study.png&w=1100&fm=webp"
-            srcSet="/.netlify/images?url=/img/hero-study.png&w=640&fm=webp 640w, /.netlify/images?url=/img/hero-study.png&w=1100&fm=webp 1100w"
+            src="/img/hero-study.png"
             sizes="(min-width: 1024px) 560px, 100vw"
             alt="An open academic journal with handwritten notes, a fountain pen and a stack of books on a wooden desk"
             width={1264}

@@ -55,7 +55,7 @@ export const sendVisitorChat = createServerFn({ method: 'POST' })
           target: chatConversations.visitorToken,
           set: { lastMessageAt: sql`now()`, closed: false },
         })
-        .returning({ id: chatConversations.id })
+        .returning()
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(chatMessages)
