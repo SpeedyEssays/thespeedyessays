@@ -3,10 +3,12 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   acceptInvite,
   handleAuthCallback,
+  isGoogleSignInEnabled,
   login,
   readSupabaseAccountLink,
   recoverPassword,
   requestPasswordRecovery,
+  signInWithGoogle,
   signup,
 } from '@/lib/account-client'
 import { useSupabase } from '@/lib/supabase-config'
@@ -60,13 +62,19 @@ function accountDestination(next: unknown) {
 export const Route = createFileRoute('/account')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { next?: string; signup?: boolean; denied?: boolean } => ({
+  ): {
+    next?: string
+    signup?: boolean
+    denied?: boolean
+    google?: boolean
+  } => ({
     next:
       typeof search.next === 'string'
         ? accountDestination(search.next)
         : undefined,
     signup: search.signup === true ? true : undefined,
     denied: search.denied === true ? true : undefined,
+    google: search.google === true ? true : undefined,
   }),
   head: () => ({
     meta: [
@@ -79,12 +87,18 @@ export const Route = createFileRoute('/account')({
 })
 
 function Account() {
-  const { next = '/dashboard', signup: startSignup, denied } = Route.useSearch()
+  const {
+    next = '/dashboard',
+    signup: startSignup,
+    denied,
+    google: googleCallback,
+  } = Route.useSearch()
   const staff = /^\/admin(?:\?|$)/.test(next)
   const [mode, setMode] = useState<Mode>(
     startSignup && !staff ? 'signup' : 'login',
   )
-  const [pending, setPending] = useState(false)
+  const [pending, setPending] = useState<'email' | 'google' | null>(null)
+  const [googleEnabled, setGoogleEnabled] = useState(false)
   const [ready, setReady] = useState(false)
   const [problem, setProblem] = useState('')
   const [notice, setNotice] = useState('')
@@ -114,7 +128,9 @@ function Account() {
           })
           .catch(() => {
             setProblem(
-              'This account link is expired or was opened in a different browser. Use Forgot password? to send a new link, then open the latest email in this browser.',
+              googleCallback
+                ? 'Google sign-in didn’t finish. Try again or sign in with email.'
+                : 'This account link is expired or was opened in a different browser. Use Forgot password? to send a new link, then open the latest email in this browser.',
             )
             setReady(true)
           })
@@ -155,7 +171,16 @@ function Account() {
         })
     }, 0)
     return () => clearTimeout(timer)
-  }, [next])
+  }, [googleCallback, next])
+
+  useEffect(() => {
+    if (!useSupabase || staff) return
+    const controller = new AbortController()
+    void isGoogleSignInEnabled(controller.signal).then((enabled) => {
+      if (!controller.signal.aborted) setGoogleEnabled(enabled)
+    })
+    return () => controller.abort()
+  }, [staff])
 
   function switchMode(value: Mode) {
     setMode(value)
@@ -166,7 +191,8 @@ function Account() {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    setPending(true)
+    if (pending) return
+    setPending('email')
     setProblem('')
     setNotice('')
     try {
@@ -197,7 +223,22 @@ function Account() {
     } catch (error) {
       setProblem(accountError(mode, error))
     } finally {
-      setPending(false)
+      setPending(null)
+    }
+  }
+
+  async function continueWithGoogle() {
+    if (pending) return
+    setPending('google')
+    setProblem('')
+    setNotice('')
+    try {
+      await signInWithGoogle(next)
+    } catch {
+      setProblem(
+        'Google sign-in couldn’t start. Try again or sign in with email.',
+      )
+      setPending(null)
     }
   }
 
@@ -285,13 +326,33 @@ function Account() {
                 {notice}
               </p>
             )}
-            <Button type="submit" className="w-full" disabled={pending}>
-              {pending
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={pending !== null}
+            >
+              {pending === 'email'
                 ? 'Please wait…'
                 : mode === 'forgot'
                   ? 'Send reset link'
                   : title}
             </Button>
+            {!staff &&
+              googleEnabled &&
+              (mode === 'login' || mode === 'signup') && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 w-full gap-2.5 border-[#747775] bg-white text-[#1f1f1f] hover:bg-[#f8faff] hover:text-[#1f1f1f]"
+                  disabled={pending !== null}
+                  onClick={() => void continueWithGoogle()}
+                >
+                  <img src="/img/google-g.png" alt="" width={18} height={18} />
+                  {pending === 'google'
+                    ? 'Opening Google…'
+                    : 'Continue with Google'}
+                </Button>
+              )}
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
               {mode !== 'login' && (
                 <button

@@ -8,6 +8,13 @@ This deployment uses the same SpeedyEssays application as the Netlify preview. T
 2. Create a private bucket named `order-files`. Leave public access off and set its maximum file size to 4 MB. Keep the storage secret on the application server.
 3. In Supabase Auth, set the Site URL to the actual website origin and allow `/account` and `/account?recovery=true` as redirect URLs. Enable email confirmation and configure a custom SMTP sender for public registration. With the default templates, the customer needs to open the confirmation or recovery link in the browser that started the flow.
 
+### Google sign-in
+
+1. In Google Auth Platform, configure the SpeedyEssays app for an external audience and create a **Web application** OAuth client. Set its authorized JavaScript origin to the public site origin. Use the exact OAuth callback URL shown in **Supabase → Authentication → Providers → Google** as the authorized redirect URI.
+2. Save the resulting client ID and secret in that Supabase Google provider panel and enable the provider. Keep the secret in Supabase.
+3. Confirm the Supabase Auth **Site URL** uses the same HTTPS origin as the public site. Customers return to `/account?google=true` and then to the portal or the order page that brought them there.
+4. Publish the Google OAuth app for public use and verify sign-in from the live customer signup page. The same button can create a new account or sign in to an existing one.
+
 ### Cloudflare Workers
 
 Connect the GitHub repository to Cloudflare Workers Builds. Use this branch while verifying the migration. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables. The publishable key is the only key that belongs in the browser bundle.

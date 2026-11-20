@@ -8,6 +8,38 @@ function auth() {
     .auth
 }
 
+export async function isGoogleSignInEnabled(signal?: AbortSignal) {
+  if (!useSupabase) return false
+  try {
+    const { url, key } = supabaseConfig()
+    const response = await fetch(new URL('/auth/v1/settings', url), {
+      headers: { apikey: key },
+      cache: 'no-store',
+      signal,
+    })
+    if (!response.ok) return false
+    const settings = await response.json()
+    return settings?.external?.google === true
+  } catch {
+    return false
+  }
+}
+
+export async function signInWithGoogle(next: string) {
+  const redirect = new URL('/account', window.location.origin)
+  redirect.searchParams.set('google', 'true')
+  if (next !== '/dashboard') redirect.searchParams.set('next', next)
+
+  const { error } = await auth().signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: redirect.href,
+      queryParams: { prompt: 'select_account' },
+    },
+  })
+  if (error) throw error
+}
+
 export async function login(email: string, password: string) {
   if (!useSupabase) return netlify.login(email, password)
   const { error } = await auth().signInWithPassword({ email, password })
@@ -88,12 +120,13 @@ export async function readSupabaseAccountLink(): Promise<AccountLink> {
   const type = params.get('type')
   const hash = params.get('token_hash')
   const code = params.get('code')
+  const google = params.get('google') === 'true'
   const recovery = params.get('recovery') === 'true'
   const fragment = new URLSearchParams(url.hash.slice(1))
   const authError = [params, fragment].some(
     (part) => part.has('error') || part.has('error_code'),
   )
-  if (!hash && !code && !recovery && !authError) return null
+  if (!hash && !code && !google && !recovery && !authError) return null
 
   try {
     const client = auth()
@@ -133,6 +166,7 @@ export async function readSupabaseAccountLink(): Promise<AccountLink> {
       'error',
       'error_code',
       'error_description',
+      'google',
       'recovery',
     ]) {
       params.delete(key)

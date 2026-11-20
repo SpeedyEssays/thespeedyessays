@@ -1,9 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readSupabaseAccountLink, recoverPassword } from './account-client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  isGoogleSignInEnabled,
+  readSupabaseAccountLink,
+  recoverPassword,
+  signInWithGoogle,
+} from './account-client'
 
 const auth = vi.hoisted(() => ({
   exchangeCodeForSession: vi.fn(),
   getUser: vi.fn(),
+  signInWithOAuth: vi.fn(),
   updateUser: vi.fn(),
   verifyOtp: vi.fn(),
 }))
@@ -26,6 +32,78 @@ const user = {
   email: 'staff@example.test',
   app_metadata: { roles: ['admin'] },
 }
+
+describe('Google sign-in', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    window.history.replaceState(null, '', '/account')
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('checks whether the Google provider is enabled', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    fetch
+      .mockResolvedValueOnce(Response.json({ external: { google: false } }))
+      .mockResolvedValueOnce(Response.json({ external: { google: true } }))
+      .mockRejectedValueOnce(new Error('Network error'))
+
+    await expect(isGoogleSignInEnabled()).resolves.toBe(false)
+    await expect(isGoogleSignInEnabled()).resolves.toBe(true)
+    await expect(isGoogleSignInEnabled()).resolves.toBe(false)
+    expect(fetch).toHaveBeenCalledWith(
+      new URL('https://example.test/auth/v1/settings'),
+      expect.objectContaining({ headers: { apikey: 'publishable-test-key' } }),
+    )
+  })
+
+  it('starts Google sign-in and preserves the requested order destination', async () => {
+    auth.signInWithOAuth.mockResolvedValue({ error: null })
+    await signInWithGoogle('/order?pages=4&deadline=7d')
+
+    const [request] = auth.signInWithOAuth.mock.calls[0]
+    const redirect = new URL(request.options.redirectTo)
+    expect(request.provider).toBe('google')
+    expect(redirect.origin).toBe(window.location.origin)
+    expect(redirect.pathname).toBe('/account')
+    expect(redirect.searchParams.get('google')).toBe('true')
+    expect(redirect.searchParams.get('next')).toBe('/order?pages=4&deadline=7d')
+  })
+
+  it('exchanges a Google code and removes it from the account URL', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/account?google=true&next=%2Forder&code=google-code&sb_flow_id=google-flow',
+    )
+    auth.exchangeCodeForSession.mockResolvedValue({
+      data: { user, session: {} },
+      error: null,
+    })
+
+    await expect(readSupabaseAccountLink()).resolves.toEqual({
+      mode: 'signed-in',
+    })
+    expect(auth.exchangeCodeForSession).toHaveBeenCalledWith('google-code', {
+      flowId: 'google-flow',
+    })
+    expect(window.location.search).toBe('?next=%2Forder')
+  })
+
+  it('clears an abandoned Google callback and leaves email sign-in available', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/account?google=true&error=access_denied',
+    )
+    await expect(readSupabaseAccountLink()).rejects.toThrow(
+      'Invalid or expired account link.',
+    )
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled()
+    expect(window.location.search).toBe('')
+  })
+})
 
 describe('password recovery', () => {
   beforeEach(() => {
