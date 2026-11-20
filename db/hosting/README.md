@@ -1,23 +1,45 @@
-# Cloudflare Workers and Supabase
+# Hosting with Supabase
 
-This deployment uses the same SpeedyEssays application as the Netlify preview. The Cloudflare build uses Supabase for email accounts, PostgreSQL and private order files.
+This deployment uses the same SpeedyEssays application as the Netlify preview. The Cloudflare and Node.js builds use Supabase for email accounts, PostgreSQL and private order files.
 
 ## Configure a new destination
 
 1. Create a Supabase project. Apply the two existing `netlify/database/migrations` SQL files in timestamp order on an empty database, then apply [supabase-access.sql](./supabase-access.sql). The last step prevents anonymous and signed-in Supabase API users from querying application tables. Keep the database connection and maintenance credentials private.
-2. Create a private bucket named `order-files`. Leave public access off and set its maximum file size to 4 MB. Keep the storage secret on the Worker.
-3. In Supabase Auth, set the Site URL to the actual Worker origin and allow `/account` and `/account?recovery=true` as redirect URLs. Enable email confirmation and configure a custom SMTP sender for public registration. With the default templates, the customer needs to open the confirmation or recovery link in the browser that started the flow.
-4. Connect the GitHub repository to Cloudflare Workers Builds. Use this branch while verifying the migration. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables. The publishable key is the only key that belongs in the browser bundle.
+2. Create a private bucket named `order-files`. Leave public access off and set its maximum file size to 4 MB. Keep the storage secret on the application server.
+3. In Supabase Auth, set the Site URL to the actual website origin and allow `/account` and `/account?recovery=true` as redirect URLs. Enable email confirmation and configure a custom SMTP sender for public registration. With the default templates, the customer needs to open the confirmation or recovery link in the browser that started the flow.
 
-   | Setting              | Value                                                                                                                                           |
-   | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Build command        | `npm run build:cloudflare`                                                                                                                      |
-   | Deploy command       | `npm run deploy:cloudflare`                                                                                                                     |
-   | Runtime database     | A cache-disabled `HYPERDRIVE` binding to Supabase, or a `DATABASE_URL` secret for the Supabase session pooler with TLS certificate verification |
-   | Runtime file storage | `SUPABASE_STORAGE_SECRET_KEY` secret                                                                                                            |
-   | Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode and `PAYSTACK_CALLBACK_ORIGIN` set to the actual Worker origin without a trailing slash             |
+### Cloudflare Workers
 
-   If using Hyperdrive through Workers Builds, add its configuration ID and the binding name `HYPERDRIVE` to the Wrangler configuration for that deployment. Keep queries uncached because staff and customer screens must show newly saved orders and messages. Set the Paystack webhook to `/api/paystack-webhook` on the deployed Worker. Complete the payment provider's business approval before switching to live mode.
+Connect the GitHub repository to Cloudflare Workers Builds. Use this branch while verifying the migration. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables. The publishable key is the only key that belongs in the browser bundle.
+
+| Setting              | Value                                                                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Build command        | `npm run build:cloudflare`                                                                                                                      |
+| Deploy command       | `npm run deploy:cloudflare`                                                                                                                     |
+| Runtime database     | A cache-disabled `HYPERDRIVE` binding to Supabase, or a `DATABASE_URL` secret for the Supabase session pooler with TLS certificate verification |
+| Runtime file storage | `SUPABASE_STORAGE_SECRET_KEY` secret                                                                                                            |
+| Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode and `PAYSTACK_CALLBACK_ORIGIN` set to the actual Worker origin without a trailing slash             |
+
+If using Hyperdrive through Workers Builds, add its configuration ID and the binding name `HYPERDRIVE` to the Wrangler configuration for that deployment. Keep queries uncached because staff and customer screens must show newly saved orders and messages.
+
+### Node.js web service
+
+Use Node.js 24 and pnpm to run the same app on a host such as Render. The build produces the same server bundle as the Worker build. The startup command serves it over HTTP using Node.js.
+
+| Setting               | Value                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| Service type          | Node.js web service                                                                            |
+| Build command         | `pnpm install --frozen-lockfile --prod=false && pnpm run build:node`                           |
+| Start command         | `pnpm run start:node`                                                                          |
+| Public build settings | `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`                                        |
+| Runtime database      | `DATABASE_URL` for the Supabase session pooler with TLS certificate verification               |
+| Runtime file storage  | `SUPABASE_STORAGE_SECRET_KEY`                                                                  |
+| Runtime checkout      | `PAYSTACK_SECRET_KEY`, `PAYSTACK_WEBHOOK_SECRET` (if separate), and `PAYSTACK_CALLBACK_ORIGIN` |
+| Website origin        | `SITE_ORIGIN` set to the public HTTPS origin. On Render it defaults to `RENDER_EXTERNAL_URL`.  |
+
+The service listens on `0.0.0.0` at the host's `PORT` (3000 locally). On Render, use a Web Service and set `SKIP_INSTALL_DEPS=true` to use the explicit install command above. The free instance is for testing and sleeps after inactivity. The database and order files live in Supabase.
+
+For either host, set the Paystack webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash. Use test keys for verification. Complete the payment provider's business approval before switching to live mode.
 
 ## Migrate data and verify the cutover
 
@@ -28,4 +50,4 @@ The active Netlify preview has its own PostgreSQL branch. Inspect both the previ
 - Netlify Identity is a separate service. Inventory and re-enrol existing users with email confirmation or an invitation, then map their old IDs to the newly verified Supabase user IDs before allowing access to their migrated records. Reassign staff roles from a verified admin list using Supabase Auth application metadata, for example `{"roles":["admin"]}`. Keep password credentials, account tokens, database dumps and chat contents out of GitHub. Website visitors will get a new chat cookie on the new domain; staff can still see migrated conversation history.
 - For a test customer, verify signup, email confirmation, password reset, and placement of a test order with an upload. Verify a staff reply from each inbox, Paystack sandbox checkout, and final-file delivery. Sign in as a second customer and confirm the first customer's orders and files are unavailable. Start accepting real customer data only after these checks on the new host.
 
-The previous Netlify `*.netlify.app` address remains tied to Netlify. Use the new `*.workers.dev` URL or a custom domain you control.
+The previous Netlify `*.netlify.app` address remains tied to Netlify. Use the new host’s public URL or a custom domain you control.
