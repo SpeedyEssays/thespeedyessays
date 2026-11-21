@@ -12,14 +12,14 @@ export const orderEmailTemplates = {
     label: "Action needed",
     subject: "Action needed for order",
     heading: "Your order needs your attention",
-    body: "Open your order and check the Messages tab for details. You can reply there if you have a question.",
+    body: "Open your order for details. If you have a question, reply under Order messages.",
     button: "Open your order",
   },
   clarification: {
     label: "Clarification needed",
     subject: "Clarification needed for order",
     heading: "We have a question about your order",
-    body: "Open your order to review the request and reply in the Messages tab so our team can continue.",
+    body: "Please open your order and reply under Order messages so our team can continue.",
     button: "Reply in your order",
   },
   delivered: {
