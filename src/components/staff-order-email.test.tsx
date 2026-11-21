@@ -5,6 +5,7 @@ import type { AdminOrderView } from "@/lib/orders";
 import { StaffOrderEmail } from "./staff-order-email";
 
 const stubs = vi.hoisted(() => ({
+  checkOrderEmailConnection: vi.fn(),
   getOrderEmailDetails: vi.fn(),
   notifyOrderCustomer: vi.fn(),
 }));
@@ -18,6 +19,7 @@ const order = {
 } as AdminOrderView;
 
 beforeEach(() => {
+  stubs.checkOrderEmailConnection.mockReset();
   stubs.getOrderEmailDetails.mockReset();
   stubs.notifyOrderCustomer.mockReset();
 });
@@ -66,5 +68,26 @@ it("prevents sending until the mail provider is configured", async () => {
 
   await screen.findByText(/Email sending needs to be connected in Render/);
   expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+  expect(stubs.notifyOrderCustomer).not.toHaveBeenCalled();
+});
+
+it("checks the connection without sending a customer email or clearing the note", async () => {
+  const user = userEvent.setup();
+  stubs.getOrderEmailDetails.mockResolvedValue({
+    status: "ready",
+    recipient: "customer@example.test",
+  });
+  stubs.checkOrderEmailConnection.mockResolvedValue("credentials-rejected");
+  render(<StaffOrderEmail order={order} />);
+  await screen.findByText("To customer@example.test");
+  const note = screen.getByLabelText("Message from support (optional)");
+  await user.type(note, "Order update");
+  await user.click(screen.getByRole("button", { name: "Check connection" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Mailjet rejected the API key and Secret Key in Render",
+  );
+  expect(note).toHaveValue("Order update");
+  expect(stubs.checkOrderEmailConnection).toHaveBeenCalledTimes(1);
   expect(stubs.notifyOrderCustomer).not.toHaveBeenCalled();
 });

@@ -117,20 +117,46 @@ ${noteMarkup}
 }
 
 type EmailConfig = NonNullable<ReturnType<typeof orderEmailConfig>>;
-const acceptedMessage = z.object({
-  Messages: z.tuple([
-    z.object({
-      Status: z.literal("success"),
-      To: z.tuple([z.object({ Email: z.email() })]),
-    }),
-  ]),
+const mailjetError = z.object({
+  ErrorCode: z.string().optional(),
+  StatusCode: z.number().optional(),
+});
+const mailjetResponse = mailjetError.extend({
+  Messages: z
+    .tuple([
+      z.object({
+        Status: z.enum(["success", "error"]),
+        To: z.tuple([z.object({ Email: z.email() })]).optional(),
+        Errors: z.array(mailjetError).optional(),
+      }),
+    ])
+    .optional(),
 });
 
-export async function sendOrderEmail(
+function mailjetFailure(status: number, code?: string) {
+  if (code === "send-0008") return "sender-not-authorized";
+  if (status === 401) {
+    return code === "mj-0001" ? "key-suspended" : "credentials-rejected";
+  }
+  if (status === 403) return "access-rejected";
+  if (status === 429) return "rate-limited";
+  if (status >= 500) return "unconfirmed";
+  return "rejected";
+}
+
+async function requestMailjet(
   config: EmailConfig,
-  message: OrderEmail & { recipient: string; requestId: string },
-): Promise<"queued" | "setup" | "rate-limited" | "rejected" | "unconfirmed"> {
-  const { subject, text, html } = renderOrderEmail(message, config.origin);
+  recipient: string,
+  content: {
+    Subject: string;
+    TextPart: string;
+    HTMLPart?: string;
+    CustomID?: string;
+    CustomCampaign?: string;
+    DeduplicateCampaign?: boolean;
+  },
+  sandbox = false,
+) {
   try {
     const response = await fetch("https://api.mailjet.com/v3.1/send", {
       method: "POST",
@@ -139,17 +165,12 @@ export async function sendOrderEmail(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        ...(sandbox && { SandboxMode: true }),
         Messages: [
           {
             From: { Email: config.from, Name: "SpeedyEssays Support" },
-            To: [{ Email: message.recipient }],
-            Subject: subject,
-            TextPart: text,
-            HTMLPart: html,
-            CustomID: `${message.code}:${message.requestId}`,
-            // Mailjet suppresses a repeat to the same person for this send request.
-            CustomCampaign: `speedy-order-${message.requestId}`,
-            DeduplicateCampaign: true,
+            To: [{ Email: recipient }],
+            ...content,
             TrackClicks: "disabled",
             TrackOpens: "disabled",
           },
@@ -158,18 +179,54 @@ export async function sendOrderEmail(
       redirect: "error",
       signal: AbortSignal.timeout(12_000),
     });
-    if (response.status === 401 || response.status === 403) return "setup";
-    if (response.status === 429) return "rate-limited";
-    if (response.status >= 500) return "unconfirmed";
-    if (!response.ok) return "rejected";
-
-    const accepted = acceptedMessage.safeParse(await response.json());
-    return accepted.success &&
-      accepted.data.Messages[0].To[0].Email.toLowerCase() ===
-        message.recipient.toLowerCase()
+    const payload = mailjetResponse.safeParse(
+      await response.json().catch(() => null),
+    ).data;
+    const message = payload?.Messages?.[0];
+    if (!response.ok || message?.Status === "error") {
+      const error =
+        message?.Errors?.find(({ ErrorCode }) => ErrorCode === "send-0008") ??
+        message?.Errors?.[0] ??
+        payload;
+      return mailjetFailure(
+        error?.StatusCode ?? response.status,
+        error?.ErrorCode,
+      );
+    }
+    return message?.Status === "success" &&
+      message.To?.[0].Email.toLowerCase() === recipient.toLowerCase()
       ? "queued"
       : "unconfirmed";
   } catch {
     return "unconfirmed";
   }
+}
+
+export async function sendOrderEmail(
+  config: EmailConfig,
+  message: OrderEmail & { recipient: string; requestId: string },
+) {
+  const { subject, text, html } = renderOrderEmail(message, config.origin);
+  return requestMailjet(config, message.recipient, {
+    Subject: subject,
+    TextPart: text,
+    HTMLPart: html,
+    CustomID: `${message.code}:${message.requestId}`,
+    // Mailjet suppresses a repeat to the same person for this send request.
+    CustomCampaign: `speedy-order-${message.requestId}`,
+    DeduplicateCampaign: true,
+  });
+}
+
+export async function checkMailjetConnection(config: EmailConfig) {
+  const result = await requestMailjet(
+    config,
+    config.from,
+    {
+      Subject: "SpeedyEssays order email connection check",
+      TextPart: "Validate the order email sender and API credentials.",
+    },
+    true,
+  );
+  return result === "queued" ? "connected" : result;
 }

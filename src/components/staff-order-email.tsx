@@ -11,6 +11,7 @@ import {
   type OrderEmailKind,
 } from "@/lib/order-email";
 import {
+  checkOrderEmailConnection,
   getOrderEmailDetails,
   notifyOrderCustomer,
 } from "@/lib/order-email.functions";
@@ -18,10 +19,19 @@ import type { AdminOrderView } from "@/lib/orders";
 
 type Details = Awaited<ReturnType<typeof getOrderEmailDetails>>;
 type Outcome = Awaited<ReturnType<typeof notifyOrderCustomer>>;
+type Connection = Awaited<ReturnType<typeof checkOrderEmailConnection>>;
 
 const problems: Record<Exclude<Outcome, "queued">, string> = {
   setup:
     "Email sending needs to be connected in Render. Ask the site owner to check the Mailjet settings.",
+  "credentials-rejected":
+    "Mailjet rejected the API key and Secret Key in Render. Replace them with a matching pair from Mailjet’s SMTP and SEND API settings.",
+  "key-suspended":
+    "Mailjet reports that the API key for order emails is suspended. Use an active key in Render or contact Mailjet.",
+  "sender-not-authorized":
+    "Mailjet hasn’t authorized the sender saved in Render. Verify the sender under the same API key, or use an active sender for that key.",
+  "access-rejected":
+    "Mailjet denied sending access for this API key. Check the key’s sending permissions in Mailjet.",
   unavailable: "This order has no confirmed customer email available.",
   "not-delivered": "Mark the order delivered before sending a delivery email.",
   "recipient-changed":
@@ -41,7 +51,9 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
   const [selected, setSelected] = useState<OrderEmailKind | null>(null);
   const [note, setNote] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [connection, setConnection] = useState<Connection | null>(null);
+  const [activity, setActivity] = useState<"sending" | "checking" | null>(null);
+  const busy = activity !== null;
   const sending = useRef(false);
   const request = useRef<{ signature: string; id: string } | null>(null);
   const canDeliver = canSendDeliveryEmail(order);
@@ -71,6 +83,23 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
     setRefreshCount((previous) => previous + 1);
   }
 
+  async function checkConnection() {
+    if (sending.current) return;
+
+    sending.current = true;
+    setActivity("checking");
+    setOutcome(null);
+    setConnection(null);
+    try {
+      setConnection(await checkOrderEmailConnection());
+    } catch {
+      setConnection("unconfirmed");
+    } finally {
+      sending.current = false;
+      setActivity(null);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
@@ -88,8 +117,9 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
       request.current = { signature, id: crypto.randomUUID() };
     }
     sending.current = true;
-    setBusy(true);
+    setActivity("sending");
     setOutcome(null);
+    setConnection(null);
 
     try {
       const result = await notifyOrderCustomer({
@@ -112,7 +142,7 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
       setOutcome("unconfirmed");
     } finally {
       sending.current = false;
-      setBusy(false);
+      setActivity(null);
     }
   }
 
@@ -199,9 +229,32 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
               {problems[outcome]}
             </p>
           ))}
-        <Button disabled={!ready || busy} size="sm" type="submit">
-          {busy ? "Sending…" : "Send email"}
-        </Button>
+        {connection &&
+          (connection === "connected" ? (
+            <p className="text-sm text-success" role="status">
+              Mailjet accepted the order email settings.
+            </p>
+          ) : (
+            <p className="text-sm text-destructive" role="alert">
+              {connection === "unconfirmed"
+                ? "Mailjet couldn’t confirm the connection. Try the check again."
+                : problems[connection]}
+            </p>
+          ))}
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={!ready || busy} size="sm" type="submit">
+            {activity === "sending" ? "Sending…" : "Send email"}
+          </Button>
+          <Button
+            disabled={busy}
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => void checkConnection()}
+          >
+            {activity === "checking" ? "Checking…" : "Check connection"}
+          </Button>
+        </div>
       </form>
     </section>
   );
