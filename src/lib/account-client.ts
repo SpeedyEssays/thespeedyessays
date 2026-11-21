@@ -63,6 +63,17 @@ export async function signup(
   if (error) throw error
 }
 
+export async function resendSignupConfirmation(email: string) {
+  const { error } = await auth().resend({
+    type: 'signup',
+    email,
+    options: {
+      emailRedirectTo: new URL('/account', window.location.origin).href,
+    },
+  })
+  if (error) throw error
+}
+
 export async function requestPasswordRecovery(email: string) {
   if (!useSupabase) return netlify.requestPasswordRecovery(email)
   const { error } = await auth().resetPasswordForEmail(email, {

@@ -8,6 +8,7 @@ import {
   readSupabaseAccountLink,
   recoverPassword,
   requestPasswordRecovery,
+  resendSignupConfirmation,
   signInWithGoogle,
   signup,
   type AccountEmailLinkType,
@@ -19,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'invite'
+type Mode = 'login' | 'signup' | 'forgot' | 'resend' | 'reset' | 'invite'
 
 const emailLinkActions: Record<AccountEmailLinkType, string> = {
   email: 'Confirm email address',
@@ -31,15 +32,31 @@ const emailLinkActions: Record<AccountEmailLinkType, string> = {
 }
 
 function accountError(mode: Mode, error: unknown) {
-  const code =
-    error && typeof error === 'object' && 'code' in error
-      ? error.code
-      : undefined
+  const details = error as { code?: string; status?: number } | null | undefined
+  const code = details?.code
+  const status = details?.status
+  if (
+    status === 429 ||
+    code === 'over_email_send_rate_limit' ||
+    code === 'over_request_rate_limit'
+  ) {
+    return 'Too many requests. Wait a few minutes before trying again.'
+  }
+  if (
+    (mode === 'signup' || mode === 'forgot' || mode === 'resend') &&
+    ((status !== undefined && status >= 500) ||
+      code === 'unexpected_failure' ||
+      code === 'request_timeout' ||
+      code === 'email_address_not_authorized')
+  ) {
+    return 'Account emails are temporarily unavailable. Please try again later.'
+  }
+  if ((mode === 'signup' || mode === 'reset') && code === 'weak_password') {
+    return 'Choose a stronger password of at least 8 characters.'
+  }
   if (mode === 'reset') {
     if (code === 'same_password')
       return 'Choose a password different from your current one.'
-    if (code === 'weak_password')
-      return 'Choose a stronger password of at least 8 characters.'
     if (code === 'recovery_session_changed' || code === 'session_not_found') {
       return 'This reset session has ended. Request a new link from the sign-in page.'
     }
@@ -50,12 +67,6 @@ function accountError(mode: Mode, error: unknown) {
     if (code === 'invalid_credentials')
       return 'The email or password is incorrect. Use Forgot password? if you need a new password.'
     return 'Sign-in failed. Check your email and password and try again.'
-  }
-  if (
-    code === 'over_email_send_rate_limit' ||
-    code === 'over_request_rate_limit'
-  ) {
-    return 'Too many requests. Wait a few minutes before trying again.'
   }
   return 'We couldn’t complete this request. Check your details or request a new link.'
 }
@@ -229,7 +240,12 @@ function Account() {
       } else if (mode === 'forgot') {
         await requestPasswordRecovery(email.trim())
         setNotice(
-          'If the email has an account, we’ll send a password reset link. Open the latest email in this browser.',
+          'If the email has an account, we’ll send a password reset link. Open the latest email to reset your password.',
+        )
+      } else if (mode === 'resend') {
+        await resendSignupConfirmation(email.trim())
+        setNotice(
+          'If your account is awaiting confirmation, a new link is on its way. Open the latest email to confirm your address.',
         )
       } else {
         if (mode === 'reset') {
@@ -310,6 +326,7 @@ function Account() {
         login: staff ? 'Staff sign in' : 'Sign in',
         signup: 'Create an account',
         forgot: 'Reset your password',
+        resend: 'Resend confirmation email',
         reset: 'Set a new password',
         invite: 'Accept your invitation',
       }[mode]
@@ -374,7 +391,7 @@ function Account() {
                 />
               </div>
             )}
-            {mode !== 'forgot' && (
+            {mode !== 'forgot' && mode !== 'resend' && (
               <div className="space-y-2">
                 <Label htmlFor="account-password">
                   {mode === 'reset' ? 'New password' : 'Password'}
@@ -412,7 +429,9 @@ function Account() {
                 ? 'Please wait…'
                 : mode === 'forgot'
                   ? 'Send reset link'
-                  : title}
+                  : mode === 'resend'
+                    ? 'Send confirmation email'
+                    : title}
             </Button>
             {!staff &&
               googleEnabled &&
@@ -435,6 +454,7 @@ function Account() {
                 <button
                   type="button"
                   className="underline"
+                  disabled={pending !== null}
                   onClick={() => switchMode('login')}
                 >
                   Sign in
@@ -444,6 +464,7 @@ function Account() {
                 <button
                   type="button"
                   className="underline"
+                  disabled={pending !== null}
                   onClick={() => switchMode('signup')}
                 >
                   Create an account
@@ -453,9 +474,20 @@ function Account() {
                 <button
                   type="button"
                   className="underline"
+                  disabled={pending !== null}
                   onClick={() => switchMode('forgot')}
                 >
                   Forgot password?
+                </button>
+              )}
+              {mode === 'login' && useSupabase && !staff && (
+                <button
+                  type="button"
+                  className="underline"
+                  disabled={pending !== null}
+                  onClick={() => switchMode('resend')}
+                >
+                  Resend confirmation
                 </button>
               )}
               <Link to={staff ? '/dashboard' : '/'} className="underline">

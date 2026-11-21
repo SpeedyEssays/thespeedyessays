@@ -3,12 +3,14 @@ import {
   isGoogleSignInEnabled,
   readSupabaseAccountLink,
   recoverPassword,
+  resendSignupConfirmation,
   signInWithGoogle,
 } from './account-client'
 
 const auth = vi.hoisted(() => ({
   exchangeCodeForSession: vi.fn(),
   getUser: vi.fn(),
+  resend: vi.fn(),
   signInWithOAuth: vi.fn(),
   updateUser: vi.fn(),
   verifyOtp: vi.fn(),
@@ -147,6 +149,32 @@ describe('account email links', () => {
 
     await expect(readSupabaseAccountLink({ confirmEmailLink: true })).rejects.toThrow('Expired link')
     expect(window.location.hash).toBe('')
+  })
+})
+
+describe('resending signup confirmation', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it('requests a new link for the existing signup using the account page', async () => {
+    auth.resend.mockResolvedValue({ error: null })
+
+    await resendSignupConfirmation('customer@example.test')
+
+    expect(auth.resend).toHaveBeenCalledWith({
+      type: 'signup',
+      email: 'customer@example.test',
+      options: { emailRedirectTo: `${window.location.origin}/account` },
+    })
+  })
+
+  it('reports a delivery failure when Supabase rejects the request', async () => {
+    const error = Object.assign(new Error('Error sending confirmation email'), {
+      status: 500,
+      code: 'unexpected_failure',
+    })
+    auth.resend.mockResolvedValue({ error })
+
+    await expect(resendSignupConfirmation('customer@example.test')).rejects.toBe(error)
   })
 })
 
