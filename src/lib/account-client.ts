@@ -108,37 +108,54 @@ export async function refreshBrowserSession() {
   return auth().getSession()
 }
 
+const accountEmailLinkTypes = [
+  'email',
+  'signup',
+  'invite',
+  'magiclink',
+  'email_change',
+  'recovery',
+] as const
+
+export type AccountEmailLinkType = (typeof accountEmailLinkTypes)[number]
+
 type AccountLink =
   | { mode: 'reset'; userId: string; email?: string }
   | { mode: 'signed-in' }
+  | { mode: 'verify-email'; type: AccountEmailLinkType }
+  | { mode: 'email-change'; pending: boolean }
   | null
 
-export async function readSupabaseAccountLink(): Promise<AccountLink> {
+export async function readSupabaseAccountLink(
+  { confirmEmailLink = false }: { confirmEmailLink?: boolean } = {},
+): Promise<AccountLink> {
   if (!useSupabase) return null
   const url = new URL(window.location.href)
   const params = url.searchParams
-  const type = params.get('type')
-  const hash = params.get('token_hash')
+  const fragment = new URLSearchParams(url.hash.slice(1))
+  const emailParams = fragment.has('token_hash') ? fragment : params
+  const hash = emailParams.get('token_hash')
+  const type = accountEmailLinkTypes.find(
+    (value) => value === emailParams.get('type'),
+  )
   const code = params.get('code')
   const google = params.get('google') === 'true'
   const recovery = params.get('recovery') === 'true'
-  const fragment = new URLSearchParams(url.hash.slice(1))
   const authError = [params, fragment].some(
     (part) => part.has('error') || part.has('error_code'),
   )
   if (!hash && !code && !google && !recovery && !authError) return null
+  if (hash && type && !confirmEmailLink) return { mode: 'verify-email', type }
 
   try {
     const client = auth()
-    if (
-      hash &&
-      (type === 'email' ||
-        type === 'signup' ||
-        type === 'invite' ||
-        type === 'recovery')
-    ) {
+    if (hash && type) {
       const { data, error } = await client.verifyOtp({ type, token_hash: hash })
       if (error) throw error
+      if (type === 'email_change') {
+        // With secure email changes, Supabase accepts the first link without issuing a session.
+        return { mode: 'email-change', pending: !data.session }
+      }
       if (!data.session || !data.user) throw new Error('Invalid account link.')
       return type === 'invite' || type === 'recovery'
         ? { mode: 'reset', userId: data.user.id, email: data.user.email }

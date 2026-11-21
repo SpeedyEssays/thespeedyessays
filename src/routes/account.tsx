@@ -10,6 +10,7 @@ import {
   requestPasswordRecovery,
   signInWithGoogle,
   signup,
+  type AccountEmailLinkType,
 } from '@/lib/account-client'
 import { useSupabase } from '@/lib/supabase-config'
 
@@ -19,6 +20,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'invite'
+
+const emailLinkActions: Record<AccountEmailLinkType, string> = {
+  email: 'Confirm email address',
+  signup: 'Confirm email address',
+  invite: 'Accept invitation',
+  magiclink: 'Sign in with email link',
+  email_change: 'Confirm email change',
+  recovery: 'Continue to reset password',
+}
 
 function accountError(mode: Mode, error: unknown) {
   const code =
@@ -97,6 +107,7 @@ function Account() {
   const [mode, setMode] = useState<Mode>(
     startSignup && !staff ? 'signup' : 'login',
   )
+  const [emailLink, setEmailLink] = useState<AccountEmailLinkType | null>(null)
   const [pending, setPending] = useState<'email' | 'google' | null>(null)
   const [googleEnabled, setGoogleEnabled] = useState(false)
   const [ready, setReady] = useState(false)
@@ -124,6 +135,7 @@ function Account() {
               setRecovery(result)
               setMode('reset')
             }
+            if (result?.mode === 'verify-email') setEmailLink(result.type)
             setReady(true)
           })
           .catch(() => {
@@ -242,13 +254,52 @@ function Account() {
     }
   }
 
-  const title = {
-    login: staff ? 'Staff sign in' : 'Sign in',
-    signup: 'Create an account',
-    forgot: 'Reset your password',
-    reset: 'Set a new password',
-    invite: 'Accept your invitation',
-  }[mode]
+  async function confirmEmailLink() {
+    if (pending) return
+    setPending('email')
+    setProblem('')
+    setNotice('')
+    try {
+      const result = await readSupabaseAccountLink({ confirmEmailLink: true })
+      if (result?.mode === 'signed-in') {
+        window.location.replace(next)
+        return
+      }
+      if (result?.mode === 'reset') {
+        setRecovery(result)
+        setMode('reset')
+      } else if (result?.mode === 'email-change') {
+        setMode('login')
+        setNotice(
+          result.pending
+            ? 'This address is confirmed. Open the confirmation email at your other address to finish the change.'
+            : 'Your email address has been updated. Use the new address to sign in.',
+        )
+      } else {
+        throw new Error('Invalid account link.')
+      }
+    } catch {
+      setMode('login')
+      setProblem(
+        emailLink === 'recovery'
+          ? 'This password reset link has expired or been used. Select Forgot password? for a new link.'
+          : 'This email link has expired or been used. Open the latest email or request a new link.',
+      )
+    } finally {
+      setEmailLink(null)
+      setPending(null)
+    }
+  }
+
+  const title = emailLink
+    ? emailLinkActions[emailLink]
+    : {
+        login: staff ? 'Staff sign in' : 'Sign in',
+        signup: 'Create an account',
+        forgot: 'Reset your password',
+        reset: 'Set a new password',
+        invite: 'Accept your invitation',
+      }[mode]
 
   return (
     <PageShell>
@@ -261,7 +312,20 @@ function Account() {
               : 'Sign in with your staff account to see customer chats and orders.'}
           </p>
         )}
-        {ready ? (
+        {emailLink ? (
+          <div className="mt-6 space-y-4 rounded-xl border bg-card p-6">
+            <p className="text-sm text-muted-foreground">
+              Select the button below to use your one-time email link.
+            </p>
+            <Button
+              className="w-full"
+              disabled={pending !== null}
+              onClick={() => void confirmEmailLink()}
+            >
+              {pending ? 'Please wait…' : title}
+            </Button>
+          </div>
+        ) : ready ? (
           <form
             onSubmit={submit}
             className="mt-6 space-y-4 rounded-xl border bg-card p-6"

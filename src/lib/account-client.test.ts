@@ -105,6 +105,51 @@ describe('Google sign-in', () => {
   })
 })
 
+describe('account email links', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    window.history.replaceState(null, '', '/account')
+  })
+
+  it.each([
+    ['email', { mode: 'signed-in' }],
+    ['magiclink', { mode: 'signed-in' }],
+    ['recovery', { mode: 'reset', userId: user.id, email: user.email }],
+    ['invite', { mode: 'reset', userId: user.id, email: user.email }],
+    ['email_change', { mode: 'email-change', pending: false }],
+  ])('uses the %s token only after the recipient continues', async (type, result) => {
+    window.history.replaceState(null, '', `/account#token_hash=one-time-hash&type=${type}`)
+    auth.verifyOtp.mockResolvedValue({ data: { user, session: {} }, error: null })
+
+    await expect(readSupabaseAccountLink()).resolves.toEqual({ mode: 'verify-email', type })
+    expect(auth.verifyOtp).not.toHaveBeenCalled()
+
+    await expect(readSupabaseAccountLink({ confirmEmailLink: true })).resolves.toEqual(result)
+    expect(auth.verifyOtp).toHaveBeenCalledWith({ type, token_hash: 'one-time-hash' })
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled()
+    expect(window.location.hash).toBe('')
+  })
+
+  it('recognizes the first of two confirmations for an email address change', async () => {
+    window.history.replaceState(null, '', '/account?token_hash=one-time-hash&type=email_change')
+    auth.verifyOtp.mockResolvedValue({ data: { user: null, session: null }, error: null })
+
+    await expect(readSupabaseAccountLink({ confirmEmailLink: true })).resolves.toEqual({
+      mode: 'email-change',
+      pending: true,
+    })
+    expect(window.location.search).toBe('')
+  })
+
+  it('clears a failed confirmation token from the account page', async () => {
+    window.history.replaceState(null, '', '/account#token_hash=expired&type=email')
+    auth.verifyOtp.mockResolvedValue({ error: new Error('Expired link') })
+
+    await expect(readSupabaseAccountLink({ confirmEmailLink: true })).rejects.toThrow('Expired link')
+    expect(window.location.hash).toBe('')
+  })
+})
+
 describe('password recovery', () => {
   beforeEach(() => {
     vi.resetAllMocks()
