@@ -123,7 +123,7 @@ function Account() {
   const [name, setName] = useState('')
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    function openAccountLink() {
       if (useSupabase) {
         void readSupabaseAccountLink()
           .then((result) => {
@@ -135,10 +135,11 @@ function Account() {
               setRecovery(result)
               setMode('reset')
             }
-            if (result?.mode === 'verify-email') setEmailLink(result.type)
+            setEmailLink(result?.mode === 'verify-email' ? result.type : null)
             setReady(true)
           })
           .catch(() => {
+            setEmailLink(null)
             setProblem(
               googleCallback
                 ? 'Google sign-in didn’t finish. Try again or sign in with email.'
@@ -181,8 +182,20 @@ function Account() {
           )
           setReady(true)
         })
-    }, 0)
-    return () => clearTimeout(timer)
+    }
+
+    function checkEmailFragment() {
+      const fragment = new URLSearchParams(window.location.hash.slice(1))
+      if (fragment.has('token_hash')) openAccountLink()
+      else setEmailLink(null)
+    }
+
+    const timer = setTimeout(openAccountLink, 0)
+    if (useSupabase) window.addEventListener('hashchange', checkEmailFragment)
+    return () => {
+      clearTimeout(timer)
+      if (useSupabase) window.removeEventListener('hashchange', checkEmailFragment)
+    }
   }, [googleCallback, next])
 
   useEffect(() => {
