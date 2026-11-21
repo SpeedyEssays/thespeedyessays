@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { createServerFn } from '@tanstack/react-start'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
 import { orderFiles, orders } from '../../db/schema'
 import { requireUser } from './identity.functions'
 import { findAccessibleOrder } from './order-records'
-import { orderCode } from './orders'
+import { canCheckout, orderCode } from './orders'
 import {
   currency,
   paymentReferenceSchema,
@@ -26,7 +26,7 @@ export const startCheckout = createServerFn({ method: 'POST' })
       throw new Error('Online checkout is unavailable. Your order is saved. Please contact support.')
     const customer = { ...context.user, isAdmin: false }
     const order = await findAccessibleOrder(data.code, customer)
-    if (!order || order.status !== 'awaiting-payment' || order.paidAt)
+    if (!order || !canCheckout(order))
       throw new Error('This order isn’t awaiting payment.')
     const db = getDb()
     if (order.instructions.length < 20) {
@@ -46,7 +46,8 @@ export const startCheckout = createServerFn({ method: 'POST' })
         .where(
           and(
             eq(orders.id, order.id),
-            eq(orders.status, 'awaiting-payment'),
+            ne(orders.status, 'cancelled'),
+            isNull(orders.paidAt),
             isNull(orders.paymentReference),
           ),
         )

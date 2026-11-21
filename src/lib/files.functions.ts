@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { getDb } from '../../db'
 import { orderFiles } from '../../db/schema'
 import { requireUser } from './identity.functions'
-import { orderFileStore } from './files.server'
+import { readOrderFile, writeOrderFile } from './files.server'
 import { checkOrderFile, fileKinds } from './orders'
 import { findAccessibleOrder } from './order-records'
 
@@ -20,20 +20,29 @@ export const uploadOrderFile = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
-    if (order.status === 'cancelled') throw new Error('This order was cancelled.')
-    if (data.kind !== 'brief' && (!context.user.isAdmin || !order.paidAt)) {
-      throw new Error('Only staff can upload deliverables for paid orders.')
+    if (order.status === 'cancelled')
+      throw new Error('This order was cancelled.')
+    if (data.kind !== 'brief' && !context.user.isAdmin) {
+      throw new Error('Only staff can upload deliverables.')
+    }
+    if (
+      !context.user.isAdmin &&
+      ['completed', 'approved'].includes(order.status)
+    ) {
+      throw new Error('Message support to add files to a delivered order.')
     }
     const blobKey = `${order.id}/${data.kind}/${data.uploadId}`
-    const store = orderFileStore()
-    const saved = await store.set(blobKey, await data.file.arrayBuffer(), { onlyIfNew: true })
+    const bytes = await data.file.arrayBuffer()
+    const saved = await writeOrderFile(blobKey, bytes)
     const name = Array.from(data.file.name, (char) =>
       char < ' ' || char.charCodeAt(0) === 127 ? '_' : char,
     ).join('')
-    if (!saved.modified) {
-      const existing = await store.get(blobKey, { type: 'arrayBuffer' })
-      if (!existing || !Buffer.from(existing).equals(Buffer.from(await data.file.arrayBuffer()))) {
-        throw new Error('This upload was already used for a different file. Select it again.')
+    if (!saved) {
+      const existing = await readOrderFile(blobKey)
+      if (!existing || !Buffer.from(existing).equals(Buffer.from(bytes))) {
+        throw new Error(
+          'This upload was already used for a different file. Select it again.',
+        )
       }
     }
     await getDb()

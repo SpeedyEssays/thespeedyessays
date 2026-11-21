@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
 import { orders } from '../../db/schema'
@@ -59,19 +59,20 @@ export async function reconcilePayment(reference: string, requireSuccess = false
   }
   const now = new Date()
   const deadline = deadlines.find((option) => option.id === order.deadlineOption)
+  const due = deadline ? new Date(now.getTime() + deadline.hours * 3600000) : order.dueAt
   await db
     .update(orders)
     .set({
-      status: 'paid',
+      status: sql`case when ${orders.status} = 'awaiting-payment' then 'paid' else ${orders.status} end`,
       paidAt: now,
       updatedAt: now,
-      dueAt: deadline ? new Date(now.getTime() + deadline.hours * 3600000) : order.dueAt,
+      dueAt: sql`case when ${orders.status} = 'awaiting-payment' then ${due.toISOString()}::timestamptz else ${orders.dueAt} end`,
     })
     .where(
       and(
         eq(orders.id, order.id),
         eq(orders.paymentReference, reference),
-        eq(orders.status, 'awaiting-payment'),
+        ne(orders.status, 'cancelled'),
         isNull(orders.paidAt),
       ),
     )

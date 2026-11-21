@@ -21,7 +21,7 @@ export function SiteFooter() {
           <h2 className="mb-3 font-sans text-sm font-semibold tracking-normal">Clients</h2>
           <ul className="space-y-2 text-sm text-primary-foreground/70">
             <li><Link to="/order" className="hover:text-primary-foreground">Place an order</Link></li>
-            <li><Link to="/dashboard" className="hover:text-primary-foreground">Client dashboard</Link></li>
+            <li><Link to="/dashboard" className="hover:text-primary-foreground">Customer portal</Link></li>
             <li><Link to="/samples" className="hover:text-primary-foreground">Sample papers</Link></li>
             <li><Link to="/" hash="pricing" className="hover:text-primary-foreground">Pricing</Link></li>
           </ul>
@@ -36,9 +36,10 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-primary-foreground/10">
-        <p className="mx-auto max-w-content px-4 py-5 text-xs text-primary-foreground/60 sm:px-6">
-          © {new Date().getFullYear()} SpeedyEssays. Papers are provided as model references for research and study purposes.
-        </p>
+        <div className="mx-auto flex max-w-content flex-wrap justify-between gap-3 px-4 py-5 text-xs text-primary-foreground/70 sm:px-6">
+          <p>© {new Date().getFullYear()} SpeedyEssays. Papers are provided as model references for research and study purposes.</p>
+          <Link to="/admin" preload={false} className="font-medium underline hover:text-primary-foreground">Staff portal</Link>
+        </div>
       </div>
     </footer>
   )

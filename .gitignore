@@ -4,3 +4,6 @@ dist/
 .env
 .env.*
 src/routeTree.gen.ts
+
+.dev.vars*
+.wrangler/

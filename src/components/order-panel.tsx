@@ -6,17 +6,25 @@ import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
 import { uploadOrderFile } from '@/lib/files.functions'
 import {
+  approveOrder,
   getOrderMessages,
   requestRevision,
   sendOrderMessage,
   updateOrderStatus,
 } from '@/lib/orders.functions'
 import {
+  canCheckout,
+  canCustomerReadFile,
   checkOrderFile,
+  fileKindLabels,
   formatBytes,
+  MAX_ORDER_FILES_PER_UPLOAD,
   orderFileAccept,
+  revisionRequestStatuses,
+  staffFileKinds,
   statusMeta,
   type FileKind,
+  type OrderFileView,
   type OrderView,
 } from '@/lib/orders'
 import { formatUSD } from '@/lib/pricing'
@@ -26,10 +34,14 @@ export function OrderPanel({
   order,
   staff = false,
   checkout = false,
+  allowApproval = false,
+  replyNotice,
 }: {
   order: OrderView
   staff?: boolean
   checkout?: boolean
+  allowApproval?: boolean
+  replyNotice?: string
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -38,10 +50,16 @@ export function OrderPanel({
   const [revision, setRevision] = useState('')
   const [kind, setKind] = useState<FileKind>(staff ? 'final' : 'brief')
   const fileInput = useRef<HTMLInputElement>(null)
-  const uploadId = useRef<string | null>(null)
-  const load = useCallback(() => getOrderMessages({ data: { code: order.code } }), [order.code])
+  const [filesToUpload, setFilesToUpload] = useState<
+    { file: File; id: string }[]
+  >([])
+  const load = useCallback(
+    () => getOrderMessages({ data: { code: order.code } }),
+    [order.code],
+  )
   const send = useCallback(
-    (body: string) => sendOrderMessage({ data: { code: order.code, body, asSupport: staff } }),
+    (body: string) =>
+      sendOrderMessage({ data: { code: order.code, body, asSupport: staff } }),
     [order.code, staff],
   )
 
@@ -56,157 +74,270 @@ export function OrderPanel({
         await router.invalidate()
       }
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : 'The update failed. Please try again.')
+      setProblem(
+        error instanceof Error
+          ? error.message
+          : 'The update failed. Please try again.',
+      )
     } finally {
       setBusy(false)
     }
   }
 
-  function upload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const file = fileInput.current?.files?.[0]
-    if (!file || !checkOrderFile(file)) {
-      setProblem('Choose a supported file up to 4 MB.')
+  function selectFiles(files: File[]) {
+    setNotice('')
+    if (
+      files.length > MAX_ORDER_FILES_PER_UPLOAD ||
+      files.some((file) => !checkOrderFile(file))
+    ) {
+      setProblem(
+        'Choose up to eight supported files, each no larger than 4 MB.',
+      )
+      setFilesToUpload([])
+      if (fileInput.current) fileInput.current.value = ''
       return
     }
-    const data = new FormData()
-    data.set('code', order.code)
-    data.set('kind', kind)
-    data.set('file', file)
-    uploadId.current ??= crypto.randomUUID()
-    data.set('uploadId', uploadId.current)
-    void run(async () => {
-      await uploadOrderFile({ data })
-      if (fileInput.current) fileInput.current.value = ''
-      uploadId.current = null
-    }, 'File uploaded.')
+    setProblem('')
+    setFilesToUpload(files.map((file) => ({ file, id: crypto.randomUUID() })))
   }
 
-  const payable = order.status === 'awaiting-payment'
-  const active = !!order.paidAt && !['cancelled', 'completed'].includes(order.status)
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!filesToUpload.length || busy) return
+    setBusy(true)
+    setProblem('')
+    setNotice('')
+    try {
+      const failed: typeof filesToUpload = []
+      for (const selection of filesToUpload) {
+        const data = new FormData()
+        data.set('code', order.code)
+        data.set('kind', kind)
+        data.set('file', selection.file)
+        data.set('uploadId', selection.id)
+        try {
+          await uploadOrderFile({ data })
+        } catch {
+          failed.push(selection)
+        }
+      }
+      setFilesToUpload(failed)
+      if (fileInput.current) fileInput.current.value = ''
+      if (failed.length) {
+        setProblem(
+          `Couldn’t upload: ${failed.map(({ file }) => file.name).join(', ')}. You can retry these files.`,
+        )
+      }
+      if (failed.length !== filesToUpload.length) {
+        const uploaded = filesToUpload.length - failed.length
+        setNotice(
+          uploaded === 1 ? 'File uploaded.' : `${uploaded} files uploaded.`,
+        )
+        await router.invalidate()
+      }
+    } catch {
+      setProblem('Files were saved. Refresh the order to update the list.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const payable = canCheckout(order)
+  const active = !['cancelled', 'completed', 'approved'].includes(order.status)
+  const customerFiles = order.files.filter((file) => file.kind === 'brief')
+  const staffFiles = order.files.filter((file) => file.kind !== 'brief')
+  const deliveries = staffFileKinds
+    .map((type) => ({
+      type,
+      files: staffFiles.filter((file) => file.kind === type),
+    }))
+    .filter(({ files }) => files.length > 0)
+  const otherFiles = staffFiles.filter((file) => !fileKindLabels[file.kind])
+  const showApproval =
+    !staff &&
+    allowApproval &&
+    order.status === 'completed' &&
+    Boolean(order.deliveredAt) &&
+    staffFiles.some((file) => file.kind === 'final')
+  const uploadForm = (staff ? order.status !== 'cancelled' : active) && (
+    <form className="space-y-2" onSubmit={(event) => void upload(event)}>
+      {staff && (
+        <div className="space-y-2">
+          <Label htmlFor="order-file-type">File type</Label>
+          <select
+            id="order-file-type"
+            className="block rounded border bg-background px-2 py-1 text-sm"
+            value={kind}
+            disabled={busy}
+            onChange={(event) => setKind(event.target.value as FileKind)}
+          >
+            {staffFileKinds.map((type) => (
+              <option key={type} value={type}>
+                {fileKindLabels[type]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <Label htmlFor="order-upload">
+        {staff ? 'Choose files for this customer' : 'Choose supporting files'}
+      </Label>
+      <Input
+        ref={fileInput}
+        id="order-upload"
+        type="file"
+        accept={orderFileAccept}
+        multiple
+        disabled={busy}
+        onChange={(event) => selectFiles(Array.from(event.target.files ?? []))}
+      />
+      <p className="text-xs text-muted-foreground">
+        Up to eight files at a time, 4 MB each.
+        {staff &&
+          !canCustomerReadFile(kind, order.deliveredAt) &&
+          ' These files become visible when you mark the order delivered.'}
+      </p>
+      {filesToUpload.length > 0 && (
+        <p className="break-words text-sm">
+          {filesToUpload.map(({ file }) => file.name).join(', ')}
+        </p>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        type="submit"
+        disabled={busy || !filesToUpload.length}
+      >
+        {busy ? 'Uploading…' : 'Upload files'}
+      </Button>
+    </form>
+  )
 
   return (
-    <section className="min-w-0 space-y-6 rounded-xl border bg-card p-5 sm:p-6" aria-label={order.code}>
+    <section
+      className="min-w-0 space-y-6 rounded-xl border bg-card p-5 sm:p-6"
+      aria-label={order.code}
+    >
       <div>
         <p className="text-sm font-medium">
           {order.code} · {statusMeta[order.status]?.label ?? order.status}
         </p>
-        <h2 className="mt-2 break-words text-2xl font-semibold">{order.title}</h2>
+        <h2 className="mt-2 break-words text-2xl font-semibold">
+          {order.title}
+        </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          {order.type} · {order.subject} · {order.level} · {order.style} · {order.pages} pages
+          {order.type} · {order.subject} · {order.level} · {order.style} ·{' '}
+          {order.pages} pages
         </p>
         <p className="mt-1 text-sm">
           {formatUSD(order.price)} USD ·{' '}
-          {order.paidAt
-            ? `Due ${new Date(order.dueAt).toISOString().slice(0, 16).replace('T', ' ')} UTC`
-            : 'Deadline starts after payment'}
+          {!staff &&
+          checkout &&
+          order.status === 'awaiting-payment' &&
+          !order.agreedDueAt
+            ? 'Deadline starts after payment'
+            : `Due ${order.dueAt.slice(0, 16).replace('T', ' ')} UTC`}
         </p>
         {order.instructions && (
-          <p className="mt-3 whitespace-pre-wrap break-words text-sm">{order.instructions}</p>
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm">
+            {order.instructions}
+          </p>
         )}
       </div>
-      {!staff && payable && (
-        <div>
-          {checkout ? (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const { url } = await startCheckout({ data: { code: order.code } })
-                    window.location.assign(url)
+      {!staff && checkout && payable && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const { url } = await startCheckout({
+                  data: { code: order.code },
+                })
+                window.location.assign(url)
+              })
+            }
+          >
+            Pay {formatUSD(order.price)} USD
+          </Button>
+          {order.checkoutStarted && (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const { paid } = await refreshPayment({
+                    data: { code: order.code },
                   })
-                }
-              >
-                Pay {formatUSD(order.price)} USD
-              </Button>
-              {order.checkoutStarted && (
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const { paid } = await refreshPayment({ data: { code: order.code } })
-                      if (!paid) throw new Error('Payment has not been confirmed yet.')
-                      await router.invalidate()
-                      setNotice('Payment confirmed.')
-                    })
-                  }
-                >
-                  Check payment status
-                </Button>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Online checkout is unavailable. Contact support about this order.
-            </p>
+                  if (!paid)
+                    throw new Error('Payment has not been confirmed yet.')
+                  await router.invalidate()
+                  setNotice('Payment confirmed.')
+                })
+              }
+            >
+              Check payment status
+            </Button>
           )}
         </div>
       )}
-      <section>
-        <h3 className="text-lg font-semibold">Files</h3>
-        {order.files.length === 0 && (
-          <p className="mt-2 text-sm text-muted-foreground">No files uploaded yet.</p>
+      <section
+        aria-labelledby="customer-files"
+        className="space-y-3 rounded-lg border bg-background p-4"
+      >
+        <h3 id="customer-files" className="text-lg font-semibold">
+          {staff ? 'Customer uploads' : 'Your uploads'}
+        </h3>
+        {customerFiles.length > 0 ? (
+          <OrderFileList files={customerFiles} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {staff
+              ? 'The customer hasn’t uploaded any files yet.'
+              : 'You haven’t uploaded any files yet.'}
+          </p>
         )}
-        <ul className="mt-2 space-y-2">
-          {order.files.map((file) => (
-            <li key={file.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <div className="min-w-0">
-                <p className="break-words text-sm font-medium">{file.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {file.kind === 'brief'
-                    ? 'Customer brief'
-                    : file.kind === 'report'
-                      ? 'Originality report'
-                      : file.kind === 'final'
-                        ? 'Final copy'
-                        : 'Draft'}{' '}
-                  · {formatBytes(file.size)}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" asChild>
-                <a href={`/api/files/${file.id}`}>Download</a>
-              </Button>
-            </li>
-          ))}
-        </ul>
-        {(staff ? active : payable) && (
-          <form className="mt-4 space-y-2" onSubmit={upload}>
-            <Label htmlFor="order-upload">
-              {staff ? 'Upload deliverable' : 'Upload a brief or supporting file'} (up to 4 MB)
-            </Label>
-            {staff && (
-              <select
-                aria-label="File type"
-                className="ml-2 rounded border bg-background px-2 py-1 text-sm"
-                value={kind}
-                disabled={busy}
-                onChange={(event) => {
-                  setKind(event.target.value as FileKind)
-                  uploadId.current = null
-                }}
-              >
-                <option value="final">Final copy</option>
-                <option value="paper">Draft</option>
-                <option value="report">Originality report</option>
-              </select>
+        {!staff && uploadForm}
+      </section>
+      <section
+        aria-labelledby="staff-files"
+        className="space-y-4 rounded-lg border bg-background p-4"
+      >
+        <h3 id="staff-files" className="text-lg font-semibold">
+          {staff ? 'Files for customer' : 'Files from support'}
+        </h3>
+        {staffFiles.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {staff
+              ? 'No files for this customer yet.'
+              : 'Files from support will appear here.'}
+          </p>
+        )}
+        {deliveries.map(({ type, files }) => (
+          <div key={type} className="space-y-2">
+            <h4 className="text-sm font-semibold">{fileKindLabels[type]}</h4>
+            {staff && !canCustomerReadFile(type, order.deliveredAt) && (
+              <p className="text-xs text-muted-foreground">
+                Visible to the customer after delivery.
+              </p>
             )}
-            <Input
-              ref={fileInput}
-              id="order-upload"
-              type="file"
-              accept={orderFileAccept}
-              required
-              disabled={busy}
-              onChange={() => {
-                uploadId.current = null
-              }}
-            />
-            <Button variant="outline" size="sm" disabled={busy}>
-              Upload file
-            </Button>
-          </form>
+            <OrderFileList files={files} />
+          </div>
+        ))}
+        {otherFiles.length > 0 && <OrderFileList files={otherFiles} />}
+        {staff && uploadForm}
+        {showApproval && (
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () => approveOrder({ data: { code: order.code } }),
+                'Order approved.',
+              )
+            }
+          >
+            Approve order
+          </Button>
         )}
       </section>
       {staff && active && (
@@ -221,7 +352,8 @@ export function OrderPanel({
                 disabled={busy}
                 onClick={() =>
                   void run(
-                    () => updateOrderStatus({ data: { code: order.code, status } }),
+                    () =>
+                      updateOrderStatus({ data: { code: order.code, status } }),
                     `Updated to ${statusMeta[status].label.toLowerCase()}.`,
                   )
                 }
@@ -233,21 +365,26 @@ export function OrderPanel({
             ))}
         </div>
       )}
-      {staff && payable && !order.checkoutStarted && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() =>
-            void run(
-              () => updateOrderStatus({ data: { code: order.code, status: 'cancelled' } }),
-              'Order cancelled.',
-            )
-          }
-        >
-          Cancel unpaid order
-        </Button>
-      )}
+      {staff &&
+        order.status === 'awaiting-payment' &&
+        !order.checkoutStarted && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () =>
+                  updateOrderStatus({
+                    data: { code: order.code, status: 'cancelled' },
+                  }),
+                'Order cancelled.',
+              )
+            }
+          >
+            Cancel unpaid order
+          </Button>
+        )}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
@@ -258,13 +395,15 @@ export function OrderPanel({
           {notice}
         </p>
       )}
-      {!staff && ['draft-ready', 'completed'].includes(order.status) && (
+      {!staff && revisionRequestStatuses.includes(order.status) && (
         <form
           className="space-y-2"
           onSubmit={(event) => {
             event.preventDefault()
             void run(async () => {
-              await requestRevision({ data: { code: order.code, notes: revision } })
+              await requestRevision({
+                data: { code: order.code, notes: revision },
+              })
               setRevision('')
             }, 'Revision requested.')
           }}
@@ -284,15 +423,47 @@ export function OrderPanel({
         </form>
       )}
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold">{staff ? 'Customer messages' : 'Order messages'}</h3>
+        <h3 className="text-lg font-semibold">
+          {staff ? 'Customer messages' : 'Order messages'}
+        </h3>
         <ChatThread
           load={load}
           send={send}
           ownSender={staff ? 'support' : 'client'}
-          otherLabel={staff ? 'Customer' : 'SpeedyEssays support'}
+          ownLabel={staff ? 'Support' : 'You'}
+          otherLabel={staff ? 'Customer' : 'Support'}
           emptyText="No messages on this order yet."
+          replyNotice={replyNotice}
         />
       </section>
     </section>
+  )
+}
+
+function OrderFileList({ files }: { files: OrderFileView[] }) {
+  return (
+    <ul className="space-y-2">
+      {files.map((file) => (
+        <li
+          key={file.id}
+          className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="break-words text-sm font-medium">{file.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {formatBytes(file.size)}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={`/api/files/${file.id}`}
+              aria-label={`Download ${file.name}`}
+            >
+              Download
+            </a>
+          </Button>
+        </li>
+      ))}
+    </ul>
   )
 }

@@ -1,10 +1,12 @@
 import { useEffect } from 'react'
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRoute, useLocation } from '@tanstack/react-router'
 
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { NotFoundPage } from '@/components/error-pages'
 import { ChatWidget } from '@/components/chat-widget'
+
+import { useSupabase } from '@/lib/supabase-config'
 
 import '../styles.css'
 
@@ -59,6 +61,12 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const showPublicChat = useLocation({
+    select: ({ pathname, search }) =>
+      pathname !== '/admin' &&
+      !(pathname === '/dashboard' && 'tab' in search && search.tab === 'chat') &&
+      !(pathname === '/account' && 'next' in search && typeof search.next === 'string' && /^\/admin(?:\?|$)/.test(search.next)),
+  })
   return (
     <html lang="en">
       <head>
@@ -67,7 +75,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body>
         <TooltipProvider>{children}</TooltipProvider>
         <IdentityEmailRedirect />
-        <ChatWidget />
+        {showPublicChat && <ChatWidget />}
         <Toaster />
         <Scripts />
       </body>
@@ -79,9 +87,9 @@ function IdentityEmailRedirect() {
   useEffect(() => {
     const { pathname, hash } = window.location
     if (['/order', '/dashboard', '/admin'].includes(pathname)) {
-      void import('@netlify/identity').then(({ getUser }) => getUser()).catch(() => {})
+      void import('@/lib/account-client').then(({ refreshBrowserSession }) => refreshBrowserSession()).catch(() => {})
     }
-    if (pathname === '/account') return
+    if (useSupabase || pathname === '/account') return
     const params = new URLSearchParams(hash.slice(1))
     if (['confirmation_token', 'recovery_token', 'invite_token', 'email_change_token', 'access_token'].some((key) => params.has(key))) {
       window.location.replace(`/account${hash}`)

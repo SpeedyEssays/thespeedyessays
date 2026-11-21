@@ -1,37 +1,45 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { getUser } from '@netlify/identity'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../../db'
 import { orderFiles, orders } from '../../db/schema'
-import { orderFileStore } from '@/lib/files.server'
-import { isAdmin } from '@/lib/identity.functions'
+import { streamOrderFile } from '@/lib/files.server'
+import { canCustomerReadFile } from '@/lib/orders'
+import { readSessionUser } from '@/lib/session.server'
 
 function fileNotFound() {
-  return new Response('File not found.', { status: 404, headers: { 'Cache-Control': 'private, no-store' } })
+  return new Response('File not found.', {
+    status: 404,
+    headers: { 'Cache-Control': 'private, no-store' },
+  })
 }
 
 export const Route = createFileRoute('/api/files/$id')({
   server: {
     handlers: {
       GET: async ({ params }) => {
-        const user = await getUser()
+        const user = await readSessionUser()
         const id = Number(params.id)
         if (!user || !/^[1-9]\d*$/.test(params.id) || id > 2147483647) {
           return fileNotFound()
         }
         const [record] = await getDb()
-          .select({ file: orderFiles, owner: orders.userId, deliveredAt: orders.deliveredAt })
+          .select({
+            file: orderFiles,
+            owner: orders.userId,
+            deliveredAt: orders.deliveredAt,
+          })
           .from(orderFiles)
           .innerJoin(orders, eq(orderFiles.orderId, orders.id))
           .where(eq(orderFiles.id, id))
         if (
           !record ||
-          (!isAdmin(user) &&
-            (record.owner !== user.id || (record.file.kind === 'final' && !record.deliveredAt)))
+          (!user.isAdmin &&
+            (record.owner !== user.id ||
+              !canCustomerReadFile(record.file.kind, record.deliveredAt)))
         ) {
           return fileNotFound()
         }
-        const stream = await orderFileStore().get(record.file.blobKey, { type: 'stream' })
+        const stream = await streamOrderFile(record.file.blobKey)
         if (!stream) return fileNotFound()
         const filename = encodeURIComponent(record.file.name).replace(
           /['()*]/g,

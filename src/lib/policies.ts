@@ -88,7 +88,7 @@ export const policies: Policy[] = [
     slug: 'privacy-policy',
     title: 'Privacy & Confidentiality Policy',
     summary: 'Your identity, your order details and your payment information are kept strictly private.',
-    updated: '2026-10-01',
+    updated: '2026-11-21',
     sections: [
       {
         heading: '1. What we collect',
@@ -119,6 +119,13 @@ export const policies: Policy[] = [
         body: [
           'You can request deletion of your account and all associated files at any time from your dashboard or by contacting support. Completed papers are deleted from our servers 90 days after delivery unless you ask us to keep them longer.',
           'We never sell your data. We use it only to provide our service, process payments and, if you opt in, send order-related updates.',
+        ],
+      },
+      {
+        heading: '6. Sign in with Google',
+        body: [
+          'If you choose to sign in with Google, Google provides your account identifier, email address and basic profile information, such as your name and profile photo, to Supabase Auth, our authentication provider.',
+          'Supabase Auth stores this information with your account to create or link your SpeedyEssays account and manage your sign-in sessions. SpeedyEssays uses your email address and name to identify your account, and authorized support staff can see these details when helping you.',
         ],
       },
     ],
