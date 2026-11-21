@@ -20,6 +20,14 @@ import { PaymentBadges } from '@/components/site/trust-badges'
 import { reviews, samples, stats } from '@/lib/fixtures'
 
 export const Route = createFileRoute('/')({
+  head: () => ({
+    meta: [
+      {
+        name: 'google-site-verification',
+        content: 'Ri1HhidTlbFiyooF9TmKFEuFbBPqh5Gs_ke46eF9Rq0',
+      },
+    ],
+  }),
   component: Home,
 })
 
