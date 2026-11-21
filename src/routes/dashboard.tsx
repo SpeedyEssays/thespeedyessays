@@ -14,6 +14,7 @@ import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
 import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
 import { statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
+import { useCustomerActivity } from '@/lib/use-customer-activity'
 
 const orderGroupLabels = {
   'awaiting-payment': 'Orders awaiting payment',
@@ -78,6 +79,7 @@ export const Route = createFileRoute('/dashboard')({
 
 function Dashboard() {
   const { user } = Route.useRouteContext()
+  useCustomerActivity(!user.isAdmin)
   const { orders, checkout, displayName } = Route.useLoaderData()
   const { order, reference, tab } = Route.useSearch()
   const router = useRouter()

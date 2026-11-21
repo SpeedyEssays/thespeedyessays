@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { StaffCustomerPresence } from '@/components/staff-customer-presence'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -204,6 +205,7 @@ function CustomerDetails({
           <p className="mt-1 break-all text-sm text-muted-foreground">
             {customer.email}
           </p>
+          <StaffCustomerPresence userId={id} />
           <div className="my-4 flex flex-wrap gap-2">
             <Button variant="outline" asChild>
               <Link to="/admin" search={{ tab: 'orders', customer: id }}>

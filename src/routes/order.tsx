@@ -28,6 +28,7 @@ import {
   type DeadlineId,
   type Extras,
 } from '@/lib/pricing'
+import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { cn } from '@/lib/utils'
 
 type OrderSearch = { level?: AcademicLevelId; deadline?: DeadlineId; pages?: number }
@@ -73,6 +74,7 @@ function OrderPage() {
   const checkout = Route.useLoaderData()
   const [step, setStep] = useState(0)
   const { user } = Route.useRouteContext()
+  useCustomerActivity(!user.isAdmin)
   const [placed, setPlaced] = useState<{ code: string; failedFiles: string[] } | null>(null)
   const submission = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)

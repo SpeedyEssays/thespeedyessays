@@ -150,3 +150,9 @@ export const customerProfiles = pgTable.withRLS('customer_profiles', {
     .notNull()
     .defaultNow(),
 })
+
+// Visible-page activity is recorded by the portal server for staff use.
+export const customerPresence = pgTable.withRLS('customer_presence', {
+  userId: text('user_id').primaryKey(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+})

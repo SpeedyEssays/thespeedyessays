@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { LocalTime } from './local-time'
 
 type Message = {
   id: number
@@ -115,13 +116,16 @@ export function ChatThread({
               key={message.id}
               className={`rounded-md p-2 ${message.sender === ownSender ? 'bg-secondary' : 'bg-card'}`}
             >
-              <p className="text-xs font-semibold">
-                {message.supportName
-                  ? `${message.supportName} Support`
-                  : message.sender === ownSender
-                    ? ownLabel
-                    : otherLabel}
-              </p>
+              <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-x-3">
+                <p className="text-xs font-semibold">
+                  {message.supportName
+                    ? `${message.supportName} Support`
+                    : message.sender === ownSender
+                      ? ownLabel
+                      : otherLabel}
+                </p>
+                <LocalTime at={message.at} className="text-xs text-muted-foreground" />
+              </div>
               <p className="whitespace-pre-wrap break-words text-sm">
                 {message.body}
               </p>

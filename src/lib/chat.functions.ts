@@ -9,6 +9,7 @@ import {
   chatMessages,
   customerProfiles,
 } from '../../db/schema'
+import { touchCustomerPresence } from './customer-presence.server'
 import { findCustomerAccount } from './customers.server'
 import { requireAdmin } from './identity.functions'
 import { readSessionUser, supportChatCookie } from './session.server'
@@ -116,6 +117,7 @@ export const readVisitorChat = createServerFn({ method: 'GET' }).handler(
     const user = await readSessionUser()
     const token = visitorToken()
     if (user) {
+      if (!user.isAdmin) await touchCustomerPresence(user.id).catch(() => {})
       const conversation = await accountConversation(getDb(), user.id)
       if (conversation) return messagesFor(conversation.id)
     }

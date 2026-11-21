@@ -12,8 +12,10 @@ import { ChatThread } from '@/components/chat-thread'
 import { OrderPanel } from '@/components/order-panel'
 import { PortalShell } from '@/components/portal-shell'
 import { StaffAdmins } from '@/components/staff-admins'
+import { StaffCustomerPresence } from '@/components/staff-customer-presence'
 import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
+import { StaffOrderEmail } from '@/components/staff-order-email'
 import {
   listSupportChats,
   readSupportChat,
@@ -219,9 +221,12 @@ function StaffOrders({
           </nav>
           <div className="min-w-0 space-y-3" key={order.code}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="break-all text-sm text-muted-foreground">
-                {order.clientEmail}
-              </p>
+              <div>
+                <p className="break-all text-sm text-muted-foreground">
+                  {order.clientEmail}
+                </p>
+                <StaffCustomerPresence userId={order.clientId} />
+              </div>
               <Button size="sm" variant="outline" asChild>
                 <Link
                   to="/admin"
@@ -241,6 +246,7 @@ function StaffOrders({
                 }}
               />
             )}
+            <StaffOrderEmail order={order} />
             <OrderPanel
               order={order}
               staff
@@ -331,9 +337,14 @@ function SupportInbox({ focus }: { focus?: string }) {
           </div>
           <div className="min-w-0 rounded-xl border bg-card p-5">
             <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="break-all text-lg font-semibold">
-                {chat.name || chat.email || 'Website visitor'}
-              </h2>
+              <div>
+                <h2 className="break-all text-lg font-semibold">
+                  {chat.name || chat.email || 'Website visitor'}
+                </h2>
+                {chat.userId && (
+                  <StaffCustomerPresence key={chat.userId} userId={chat.userId} />
+                )}
+              </div>
               {chat.userId && (
                 <Button size="sm" variant="outline" asChild>
                   <Link

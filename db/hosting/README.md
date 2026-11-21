@@ -48,6 +48,22 @@ The service listens on `0.0.0.0` at the host's `PORT` (3000 locally). On Render,
 
 For either host, set the Paystack webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash. Use test keys for verification. Complete the payment provider's business approval before switching to live mode.
 
+### Order notification email
+
+In Render, open the SpeedyEssays service’s **Environment** page and set these runtime variables.
+
+| Variable | Value |
+| --- | --- |
+| `MAILJET_API_KEY` | Mailjet API Key, also called the SMTP username |
+| `MAILJET_SECRET_KEY` | Matching Mailjet Secret Key |
+| `MAILJET_FROM_EMAIL` | An active, verified sender address for that Mailjet key |
+
+Order notifications use the Mailjet HTTPS Send API. Staff can send from **Orders → Email customer**. Keep the credentials on the server. A dedicated Mailjet subaccount can supply a separate key without rotating the key used by Supabase Auth.
+
+### Customer activity
+
+Apply the customer presence database migration before deploying the portal update. On existing Supabase databases, also revoke grants on `public.customer_presence` from `public`, `anon`, and `authenticated`. Staff read activity through the portal server. A visible customer portal page reports activity every 30 seconds. Customer live chat also reports activity. Staff see an account as offline after 90 seconds without activity.
+
 ## Portal entry points
 
 - Customers sign in through the Customer portal and use `/dashboard` for their orders and live support.
