@@ -20,7 +20,7 @@ This deployment uses the same SpeedyEssays application as the Netlify preview. T
 To move an existing SpeedyEssays deployment from Render, use the same Supabase
 project. Keep its database, Auth users, SMTP configuration, and private bucket.
 Connect `SpeedyEssays/thespeedyessays` to Cloudflare Workers Builds and use the
-`cloudflare-supabase` branch with the Worker name `speedyessays`. Set
+`cloudflare-supabase` branch with the Worker name `thespeedyessays`. Set
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables.
 Use the remaining credentials as runtime secrets.
 
