@@ -1,7 +1,9 @@
+// @vitest-environment node
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { canSendDeliveryEmail, orderEmailKinds } from "./order-email";
 import {
-  checkMailjetConnection,
+  checkGmailConnection,
   orderEmailConfig,
   renderOrderEmail,
   sendOrderEmail,
@@ -9,9 +11,10 @@ import {
 
 const config = {
   origin: "https://orders.example.test",
-  from: "support@example.test",
-  key: "mock-api-key",
-  secret: "mock-secret",
+  sender: {
+    url: "https://script.google.com/macros/s/test-deployment/exec",
+    secret: "c".repeat(64),
+  },
 };
 const delivery = {
   code: "SE-48001",
@@ -60,102 +63,85 @@ describe("order email", () => {
     );
   });
 
-  it("requires a verified sender setting and a trusted HTTPS site origin", () => {
-    vi.stubEnv("MAILJET_API_KEY", "mock-api-key");
-    vi.stubEnv("MAILJET_SECRET_KEY", "mock-secret");
-    vi.stubEnv("MAILJET_FROM_EMAIL", "support@example.test");
+  it("requires an Apps Script deployment, a connection key and a trusted site origin", () => {
+    vi.stubEnv("SPEEDYESSAYS_EMAIL_URL", config.sender.url);
+    vi.stubEnv("SPEEDYESSAYS_EMAIL_SECRET", config.sender.secret);
     vi.stubEnv("SITE_ORIGIN", "https://orders.example.test/");
     expect(orderEmailConfig()).toEqual(config);
     vi.stubEnv("SITE_ORIGIN", "https://orders.example.test/untrusted");
     expect(orderEmailConfig()).toBeNull();
-    vi.stubEnv("MAILJET_SECRET_KEY", "");
+    vi.stubEnv("SITE_ORIGIN", config.origin);
+    vi.stubEnv(
+      "SPEEDYESSAYS_EMAIL_URL",
+      "https://script.google.com.example.test/macros/s/test/exec",
+    );
     expect(orderEmailConfig()).toBeNull();
   });
 
   it("queues an email for the selected customer and reuses the retry identity", async () => {
     const fetch = vi.fn<
       (url: string, options: RequestInit) => Promise<Response>
-    >(async () =>
-      Response.json({
-        Messages: [{ Status: "success", To: [{ Email: delivery.recipient }] }],
-      }),
-    );
+    >(async () => Response.json({ status: "queued" }));
     vi.stubGlobal("fetch", fetch);
     await expect(sendOrderEmail(config, delivery)).resolves.toBe("queued");
     await sendOrderEmail(config, delivery);
     const [url, request] = fetch.mock.calls[0];
-    const payload = JSON.parse(String(request.body));
-    expect(url).toBe("https://api.mailjet.com/v3.1/send");
-    expect(payload).not.toHaveProperty("SandboxMode");
-    expect(payload.Messages).toEqual([
-      expect.objectContaining({
-        To: [{ Email: delivery.recipient }],
-        CustomID: `${delivery.code}:${delivery.requestId}`,
-        DeduplicateCampaign: true,
-        TrackClicks: "disabled",
-      }),
-    ]);
-    expect(fetch.mock.calls[1][1].body).toBe(request.body);
+    const { payload, timestamp, signature } = JSON.parse(String(request.body));
+    expect(url).toBe(config.sender.url);
+    expect(JSON.parse(payload)).toMatchObject({
+      action: "send",
+      to: delivery.recipient,
+      id: `${delivery.code}:${delivery.requestId}`,
+    });
+    expect(signature).toBe(
+      createHmac("sha256", config.sender.secret)
+        .update(`${timestamp}.${payload}`)
+        .digest("base64"),
+    );
+    expect(String(request.body)).not.toContain(config.sender.secret);
+    expect(JSON.parse(String(fetch.mock.calls[1][1].body)).payload).toBe(
+      payload,
+    );
   });
 
   it("keeps failures and uncertain delivery states distinct from a queued email", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    fetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    fetch.mockResolvedValueOnce(Response.json({ status: "access-denied" }));
     await expect(sendOrderEmail(config, delivery)).resolves.toBe(
       "credentials-rejected",
     );
-    fetch.mockResolvedValueOnce(new Response(null, { status: 429 }));
+    fetch.mockResolvedValueOnce(Response.json({ status: "quota" }));
     await expect(sendOrderEmail(config, delivery)).resolves.toBe(
       "rate-limited",
     );
     fetch.mockRejectedValueOnce(new Error("Network unavailable"));
     await expect(sendOrderEmail(config, delivery)).resolves.toBe("unconfirmed");
-    fetch.mockResolvedValueOnce(
-      Response.json({ Messages: [{ Status: "error" }] }),
-    );
+    fetch.mockResolvedValueOnce(Response.json({ status: "invalid" }));
     await expect(sendOrderEmail(config, delivery)).resolves.toBe("rejected");
   });
 
-  it("distinguishes an unauthorized sender from rejected credentials", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        Response.json(
-          {
-            Messages: [
-              {
-                Status: "error",
-                Errors: [{ ErrorCode: "send-0008", StatusCode: 403 }],
-              },
-            ],
-          },
-          { status: 403 },
-        ),
-      ),
-    );
-    await expect(sendOrderEmail(config, delivery)).resolves.toBe(
-      "sender-not-authorized",
-    );
+  it("does not forward signed requests to a redirect outside Google", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(Response.redirect("https://example.test/elsewhere"));
+    vi.stubGlobal("fetch", fetch);
+    await expect(sendOrderEmail(config, delivery)).resolves.toBe("unconfirmed");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("checks Mailjet in sandbox mode using only the configured sender address", async () => {
+  it("checks the sender without sending an email and follows Google's result URL", async () => {
     const fetch =
       vi.fn<(url: string, options: RequestInit) => Promise<Response>>();
-    fetch.mockResolvedValueOnce(
-      Response.json({
-        Messages: [{ Status: "success", To: [{ Email: config.from }] }],
-      }),
-    );
+    const result =
+      "https://script.googleusercontent.com/macros/echo?test=result";
+    fetch.mockResolvedValueOnce(Response.redirect(result, 302));
+    fetch.mockResolvedValueOnce(Response.json({ status: "ready" }));
     vi.stubGlobal("fetch", fetch);
-    await expect(checkMailjetConnection(config)).resolves.toBe("connected");
+    await expect(checkGmailConnection(config)).resolves.toBe("connected");
     const payload = JSON.parse(String(fetch.mock.calls[0][1].body));
-    expect(payload.SandboxMode).toBe(true);
-    expect(payload.Messages).toEqual([
-      expect.objectContaining({
-        From: { Email: config.from, Name: "SpeedyEssays Support" },
-        To: [{ Email: config.from }],
-      }),
-    ]);
+    expect(JSON.parse(payload.payload)).toEqual({ action: "check" });
+    expect(fetch.mock.calls[1][0]).toBe(result);
+    expect(fetch.mock.calls[1][1].body).toBeUndefined();
   });
 });

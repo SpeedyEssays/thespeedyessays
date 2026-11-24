@@ -2,6 +2,12 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../../db";
 import {
+  checkGmail,
+  emailSiteOrigin,
+  gmailSenderConfig,
+  sendGmail,
+} from "./gmail-sender.server";
+import {
   orderEmailSubject,
   orderEmailTemplates,
   type OrderEmailKind,
@@ -11,34 +17,9 @@ import { useSupabase } from "./supabase-config";
 const emailAddress = z.email().max(320);
 
 export function orderEmailConfig() {
-  const key = process.env.MAILJET_API_KEY?.trim();
-  const secret = process.env.MAILJET_SECRET_KEY?.trim();
-  const from = emailAddress.safeParse(process.env.MAILJET_FROM_EMAIL?.trim());
-  const configuredOrigin =
-    process.env.SITE_ORIGIN || process.env.RENDER_EXTERNAL_URL;
-
-  if (
-    !key ||
-    !secret ||
-    !from.success ||
-    !configuredOrigin ||
-    !URL.canParse(configuredOrigin)
-  ) {
-    return null;
-  }
-  const url = new URL(configuredOrigin);
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  ) {
-    return null;
-  }
-
-  return { key, secret, from: from.data, origin: url.origin };
+  const sender = gmailSenderConfig();
+  const origin = emailSiteOrigin();
+  return sender && origin ? { sender, origin } : null;
 }
 
 export async function orderEmailRecipient(order: {
@@ -117,89 +98,12 @@ ${noteMarkup}
 }
 
 type EmailConfig = NonNullable<ReturnType<typeof orderEmailConfig>>;
-const mailjetError = z.object({
-  ErrorCode: z.string().optional(),
-  StatusCode: z.number().optional(),
-});
-const mailjetResponse = mailjetError.extend({
-  Messages: z
-    .tuple([
-      z.object({
-        Status: z.enum(["success", "error"]),
-        To: z.tuple([z.object({ Email: z.email() })]).optional(),
-        Errors: z.array(mailjetError).optional(),
-      }),
-    ])
-    .optional(),
-});
 
-function mailjetFailure(status: number, code?: string) {
-  if (code === "send-0008") return "sender-not-authorized";
-  if (status === 401) {
-    return code === "mj-0001" ? "key-suspended" : "credentials-rejected";
-  }
-  if (status === 403) return "access-rejected";
-  if (status === 429) return "rate-limited";
-  if (status >= 500) return "unconfirmed";
-  return "rejected";
-}
-
-async function requestMailjet(
-  config: EmailConfig,
-  recipient: string,
-  content: {
-    Subject: string;
-    TextPart: string;
-    HTMLPart?: string;
-    CustomID?: string;
-    CustomCampaign?: string;
-    DeduplicateCampaign?: boolean;
-  },
-  sandbox = false,
-) {
-  try {
-    const response = await fetch("https://api.mailjet.com/v3.1/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${config.key}:${config.secret}`).toString("base64")}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ...(sandbox && { SandboxMode: true }),
-        Messages: [
-          {
-            From: { Email: config.from, Name: "SpeedyEssays Support" },
-            To: [{ Email: recipient }],
-            ...content,
-            TrackClicks: "disabled",
-            TrackOpens: "disabled",
-          },
-        ],
-      }),
-      redirect: "error",
-      signal: AbortSignal.timeout(12_000),
-    });
-    const payload = mailjetResponse.safeParse(
-      await response.json().catch(() => null),
-    ).data;
-    const message = payload?.Messages?.[0];
-    if (!response.ok || message?.Status === "error") {
-      const error =
-        message?.Errors?.find(({ ErrorCode }) => ErrorCode === "send-0008") ??
-        message?.Errors?.[0] ??
-        payload;
-      return mailjetFailure(
-        error?.StatusCode ?? response.status,
-        error?.ErrorCode,
-      );
-    }
-    return message?.Status === "success" &&
-      message.To?.[0].Email.toLowerCase() === recipient.toLowerCase()
-      ? "queued"
-      : "unconfirmed";
-  } catch {
-    return "unconfirmed";
-  }
+function gmailFailure(result: Awaited<ReturnType<typeof sendGmail>>) {
+  if (result === "quota") return "rate-limited";
+  if (result === "access-denied") return "credentials-rejected";
+  if (result === "invalid") return "rejected";
+  return "unconfirmed";
 }
 
 export async function sendOrderEmail(
@@ -207,26 +111,17 @@ export async function sendOrderEmail(
   message: OrderEmail & { recipient: string; requestId: string },
 ) {
   const { subject, text, html } = renderOrderEmail(message, config.origin);
-  return requestMailjet(config, message.recipient, {
-    Subject: subject,
-    TextPart: text,
-    HTMLPart: html,
-    CustomID: `${message.code}:${message.requestId}`,
-    // Mailjet suppresses a repeat to the same person for this send request.
-    CustomCampaign: `speedy-order-${message.requestId}`,
-    DeduplicateCampaign: true,
+  const result = await sendGmail(config.sender, {
+    id: `${message.code}:${message.requestId}`,
+    to: message.recipient,
+    subject,
+    text,
+    html,
   });
+  return result === "queued" ? result : gmailFailure(result);
 }
 
-export async function checkMailjetConnection(config: EmailConfig) {
-  const result = await requestMailjet(
-    config,
-    config.from,
-    {
-      Subject: "SpeedyEssays order email connection check",
-      TextPart: "Validate the order email sender and API credentials.",
-    },
-    true,
-  );
-  return result === "queued" ? "connected" : result;
+export async function checkGmailConnection(config: EmailConfig) {
+  const result = await checkGmail(config.sender);
+  return result === "ready" ? "connected" : gmailFailure(result);
 }

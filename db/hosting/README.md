@@ -30,7 +30,7 @@ Use the remaining credentials as runtime secrets.
 | Deploy command       | `pnpm run deploy:cloudflare`                                                                                                                    |
 | Runtime database     | A cache-disabled `HYPERDRIVE` binding to Supabase, or a `DATABASE_URL` secret for the Supabase session pooler with TLS certificate verification |
 | Runtime file storage | `SUPABASE_STORAGE_SECRET_KEY` secret                                                                                                            |
-| Order notifications  | `MAILJET_API_KEY`, `MAILJET_SECRET_KEY` and `MAILJET_FROM_EMAIL` if staff order emails are configured                                           |
+| Order notifications  | `SPEEDYESSAYS_EMAIL_URL` and `SPEEDYESSAYS_EMAIL_SECRET` if [Gmail sending](./gmail-sender.md) is configured                                    |
 | Website origin       | `SITE_ORIGIN` set to the new public HTTPS origin without a trailing slash                                                                       |
 | Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode, `PAYSTACK_WEBHOOK_SECRET` if separate, and `PAYSTACK_CALLBACK_ORIGIN` set to the Worker origin     |
 
@@ -69,15 +69,9 @@ For either host, set the Paystack webhook to `/api/paystack-webhook` on the depl
 
 ### Order notification email
 
-In Render, open the SpeedyEssays service’s **Environment** page and set these runtime variables.
-
-| Variable             | Value                                                   |
-| -------------------- | ------------------------------------------------------- |
-| `MAILJET_API_KEY`    | Mailjet API Key, also called the SMTP username          |
-| `MAILJET_SECRET_KEY` | Matching Mailjet Secret Key                             |
-| `MAILJET_FROM_EMAIL` | An active, verified sender address for that Mailjet key |
-
-Order notifications use the Mailjet HTTPS Send API. Staff can send from **Orders → Email customer**. Keep the credentials on the server. A dedicated Mailjet subaccount can supply a separate key without rotating the key used by Supabase Auth.
+Follow [Gmail sender setup](./gmail-sender.md) to link Apps Script.
+Staff send from **Orders → Email customer** using the current confirmed
+customer email and the existing order templates.
 
 ### Customer activity
 

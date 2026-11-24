@@ -23,25 +23,19 @@ type Connection = Awaited<ReturnType<typeof checkOrderEmailConnection>>;
 
 const problems: Record<Exclude<Outcome, "queued">, string> = {
   setup:
-    "Email sending needs to be connected in Render. Ask the site owner to check the Mailjet settings.",
+    "Email sending needs to be connected in Cloudflare. Ask the site owner to check the Gmail sender settings.",
   "credentials-rejected":
-    "Mailjet rejected the API key and Secret Key in Render. Replace them with a matching pair from Mailjet’s SMTP and SEND API settings.",
-  "key-suspended":
-    "Mailjet reports that the API key for order emails is suspended. Use an active key in Render or contact Mailjet.",
-  "sender-not-authorized":
-    "Mailjet hasn’t authorized the sender saved in Render. Verify the sender under the same API key, or use an active sender for that key.",
-  "access-rejected":
-    "Mailjet denied sending access for this API key. Check the key’s sending permissions in Mailjet.",
+    "The Gmail sender rejected the connection. Check that Cloudflare and Apps Script use the same connection key.",
   unavailable: "This order has no confirmed customer email available.",
   "not-delivered": "Mark the order delivered before sending a delivery email.",
   "recipient-changed":
     "The customer’s email address changed. Review the updated address before sending.",
   "rate-limited":
-    "Mailjet is limiting sends. Try the same email again in a few minutes.",
+    "Gmail has reached its daily sending limit. Try again when the quota resets.",
   rejected:
-    "Mailjet rejected the email. Check the sender settings or the Mailjet activity log.",
+    "The Gmail sender rejected this email. Review the recipient and message, then try again.",
   unconfirmed:
-    "Mailjet did not confirm the request. Retrying this same email here uses the same request to help prevent duplicates.",
+    "The Gmail sender did not confirm the request. Retrying this email here reuses the same request to help prevent duplicates.",
 };
 
 export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
@@ -232,12 +226,12 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
         {connection &&
           (connection === "connected" ? (
             <p className="text-sm text-success" role="status">
-              Mailjet accepted the order email settings.
+              The Gmail sender is connected.
             </p>
           ) : (
             <p className="text-sm text-destructive" role="alert">
               {connection === "unconfirmed"
-                ? "Mailjet couldn’t confirm the connection. Try the check again."
+                ? "The Gmail sender couldn’t confirm the connection. Try the check again."
                 : problems[connection]}
             </p>
           ))}

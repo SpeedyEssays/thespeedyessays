@@ -7,7 +7,7 @@ import {
   orderEmailNoteLimit,
 } from "./order-email";
 import {
-  checkMailjetConnection,
+  checkGmailConnection,
   orderEmailConfig,
   orderEmailRecipient,
   sendOrderEmail,
@@ -33,7 +33,7 @@ export const checkOrderEmailConnection = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .handler(() => {
     const config = orderEmailConfig();
-    return config ? checkMailjetConnection(config) : ("setup" as const);
+    return config ? checkGmailConnection(config) : ("setup" as const);
   });
 
 export const notifyOrderCustomer = createServerFn({ method: "POST" })

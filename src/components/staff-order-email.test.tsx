@@ -66,7 +66,7 @@ it("prevents sending until the mail provider is configured", async () => {
   stubs.getOrderEmailDetails.mockResolvedValue({ status: "setup" });
   render(<StaffOrderEmail order={order} />);
 
-  await screen.findByText(/Email sending needs to be connected in Render/);
+  await screen.findByText(/Email sending needs to be connected in Cloudflare/);
   expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
   expect(stubs.notifyOrderCustomer).not.toHaveBeenCalled();
 });
@@ -85,7 +85,7 @@ it("checks the connection without sending a customer email or clearing the note"
   await user.click(screen.getByRole("button", { name: "Check connection" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Mailjet rejected the API key and Secret Key in Render",
+    "The Gmail sender rejected the connection",
   );
   expect(note).toHaveValue("Order update");
   expect(stubs.checkOrderEmailConnection).toHaveBeenCalledTimes(1);
