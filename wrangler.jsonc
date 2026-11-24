@@ -3,6 +3,7 @@
   "name": "speedyessays",
   "main": "./src/worker.ts",
   "compatibility_date": "2026-11-20",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "keep_vars": true,
 }

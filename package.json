@@ -11,7 +11,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "build:cloudflare": "vite build --mode cloudflare",
+    "build:cloudflare": "vite build --mode cloudflare && node --experimental-strip-types scripts/prerender-public.mjs",
     "deploy:cloudflare": "wrangler deploy",
     "build:node": "vite build --mode cloudflare",
     "start:node": "node scripts/start-node.mjs"

@@ -17,17 +17,36 @@ This deployment uses the same SpeedyEssays application as the Netlify preview. T
 
 ### Cloudflare Workers
 
-Connect the GitHub repository to Cloudflare Workers Builds. Use this branch while verifying the migration. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables. The publishable key is the only key that belongs in the browser bundle.
+To move an existing SpeedyEssays deployment from Render, use the same Supabase
+project. Keep its database, Auth users, SMTP configuration, and private bucket.
+Connect `SpeedyEssays/thespeedyessays` to Cloudflare Workers Builds and use the
+`cloudflare-supabase` branch with the Worker name `speedyessays`. Set
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build variables.
+Use the remaining credentials as runtime secrets.
 
 | Setting              | Value                                                                                                                                           |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build command        | `npm run build:cloudflare`                                                                                                                      |
-| Deploy command       | `npm run deploy:cloudflare`                                                                                                                     |
+| Build command        | `pnpm run build:cloudflare`                                                                                                                     |
+| Deploy command       | `pnpm run deploy:cloudflare`                                                                                                                    |
 | Runtime database     | A cache-disabled `HYPERDRIVE` binding to Supabase, or a `DATABASE_URL` secret for the Supabase session pooler with TLS certificate verification |
 | Runtime file storage | `SUPABASE_STORAGE_SECRET_KEY` secret                                                                                                            |
-| Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode and `PAYSTACK_CALLBACK_ORIGIN` set to the actual Worker origin without a trailing slash             |
+| Order notifications  | `MAILJET_API_KEY`, `MAILJET_SECRET_KEY` and `MAILJET_FROM_EMAIL` if staff order emails are configured                                           |
+| Website origin       | `SITE_ORIGIN` set to the new public HTTPS origin without a trailing slash                                                                       |
+| Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode, `PAYSTACK_WEBHOOK_SECRET` if separate, and `PAYSTACK_CALLBACK_ORIGIN` set to the Worker origin     |
 
 If using Hyperdrive through Workers Builds, add its configuration ID and the binding name `HYPERDRIVE` to the Wrangler configuration for that deployment. Keep queries uncached because staff and customer screens must show newly saved orders and messages.
+
+After deployment, use the new public HTTPS origin as the Supabase Auth Site URL.
+Allow the new origin's `/account`, `/account?recovery=true`,
+`/account?google=true`, and `/account?google=true&next=**` redirects. Check
+the email templates for links containing the old hostname. If Google sign-in is
+enabled, update its authorized website origin and check the consent-screen links.
+Run the portal checks below before sharing the address with customers.
+
+The Cloudflare build renders the homepage, samples, and policies into static
+assets. Those pages and their styles, scripts, and images can be served without
+a Worker invocation. Account and staff routes, chat, and order operations
+continue to use the Worker and consume its daily request allowance.
 
 ### Node.js web service
 
@@ -52,10 +71,10 @@ For either host, set the Paystack webhook to `/api/paystack-webhook` on the depl
 
 In Render, open the SpeedyEssays service’s **Environment** page and set these runtime variables.
 
-| Variable | Value |
-| --- | --- |
-| `MAILJET_API_KEY` | Mailjet API Key, also called the SMTP username |
-| `MAILJET_SECRET_KEY` | Matching Mailjet Secret Key |
+| Variable             | Value                                                   |
+| -------------------- | ------------------------------------------------------- |
+| `MAILJET_API_KEY`    | Mailjet API Key, also called the SMTP username          |
+| `MAILJET_SECRET_KEY` | Matching Mailjet Secret Key                             |
 | `MAILJET_FROM_EMAIL` | An active, verified sender address for that Mailjet key |
 
 Order notifications use the Mailjet HTTPS Send API. Staff can send from **Orders → Email customer**. Keep the credentials on the server. A dedicated Mailjet subaccount can supply a separate key without rotating the key used by Supabase Auth.
