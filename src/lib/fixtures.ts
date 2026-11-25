@@ -153,15 +153,94 @@ export type Sample = {
 }
 
 export const samples: Sample[] = [
-  { id: 'nursing-sepsis', title: 'Early recognition of sepsis in emergency departments', subject: 'Nursing', type: 'Research Paper', level: 'Undergraduate', style: 'APA 7', pages: 7, excerpt: 'Sepsis remains a leading cause of in-hospital mortality, yet delays in recognition persist. This paper evaluates the qSOFA and NEWS2 screening tools…' },
-  { id: 'nursing-ethics', title: 'Patient autonomy and informed consent in palliative care', subject: 'Nursing', type: 'Essay', level: "Master's", style: 'APA 7', pages: 5, excerpt: 'Respecting autonomy at the end of life requires more than a signed form. Drawing on Beauchamp and Childress, this essay examines…' },
-  { id: 'business-tesla', title: 'Strategic positioning of Tesla in a maturing EV market', subject: 'Business', type: 'Case Study', level: "Master's", style: 'Harvard', pages: 9, excerpt: 'As incumbents close the technology gap, Tesla’s first-mover advantage erodes. Applying the VRIO framework, we assess which capabilities remain…' },
-  { id: 'business-hr', title: 'Remote work and organisational commitment: a literature review', subject: 'Business', type: 'Literature Review', level: 'Undergraduate', style: 'APA 7', pages: 6, excerpt: 'The rapid shift to remote work after 2020 has prompted a growing body of research on employee commitment. This review synthesises…' },
-  { id: 'history-cold-war', title: 'The Cuban Missile Crisis as a failure of deterrence', subject: 'History', type: 'Essay', level: 'Undergraduate', style: 'Chicago', pages: 5, excerpt: 'Conventional accounts celebrate October 1962 as a triumph of crisis management. This essay argues instead that deterrence had already failed…' },
-  { id: 'history-industrial', title: 'Child labour and reform in Victorian textile mills', subject: 'History', type: 'Research Paper', level: 'High School', style: 'MLA 9', pages: 4, excerpt: 'The Factory Acts of the nineteenth century reshaped British industry. Using parliamentary reports and mill records, this paper traces…' },
-  { id: 'psych-memory', title: 'Reconstructive memory and eyewitness testimony', subject: 'Psychology', type: 'Essay', level: 'Undergraduate', style: 'APA 7', pages: 4, excerpt: 'Loftus and Palmer’s classic studies showed how leading questions distort recall. This essay considers the implications for courtroom procedure…' },
-  { id: 'econ-inflation', title: 'Monetary policy responses to post-pandemic inflation', subject: 'Economics', type: 'Term Paper', level: 'PhD', style: 'Chicago', pages: 12, excerpt: 'Central banks faced a policy dilemma as supply shocks met demand recovery. This paper compares the Federal Reserve and ECB responses…' },
-  { id: 'english-gatsby', title: 'Unreliable narration in The Great Gatsby', subject: 'English Literature', type: 'Essay', level: 'High School', style: 'MLA 9', pages: 3, excerpt: 'Nick Carraway insists he is “one of the few honest people” he has ever known. This essay examines how Fitzgerald undermines that claim…' },
+  {
+    id: 'health-care-policy-reform',
+    title: 'Recommendations for Health Care Policy Reform',
+    subject: 'Health Policy',
+    type: 'Policy Analysis',
+    level: 'University',
+    style: 'APA-style',
+    pages: 7,
+    excerpt:
+      'Examines barriers to healthcare access and affordability, then evaluates policy changes to improve both.',
+  },
+  {
+    id: 'tableau-and-power-bi-visual-analytics',
+    title: 'Visual Analytics with Tableau and Power BI',
+    subject: 'Data Analytics',
+    type: 'Comparative Report',
+    level: 'University',
+    style: 'APA-style',
+    pages: 5,
+    excerpt:
+      'Compares Tableau and Power BI using example dashboards, visualization features, and recommendations for different users.',
+  },
+  {
+    id: 'restaurant-employee-retention',
+    title: 'Effective Strategies Restaurant Owners Use to Retain Employees',
+    subject: 'Business',
+    type: 'Problem Statement',
+    level: 'University',
+    style: 'APA-style',
+    pages: 3,
+    excerpt:
+      'Defines a research problem and purpose around staff turnover and retention in the restaurant industry.',
+  },
+  {
+    id: 'sartre-and-nietzsche-on-ignorance',
+    title: 'Sartre and Nietzsche on Ignorance',
+    subject: 'Philosophy',
+    type: 'Comparative Essay',
+    level: 'University',
+    style: 'MLA-style',
+    pages: 5,
+    excerpt:
+      'Compares Sartre and Nietzsche on whether ignorance offers relief and what each thinker regards as an authentic response to difficulty.',
+  },
+  {
+    id: 'clinical-laboratory-technology-graduates',
+    title: 'Clinical Laboratory Technology Graduates in Practice',
+    subject: 'Health Sciences',
+    type: 'Proposal Chapter',
+    level: 'University',
+    style: 'APA-style',
+    pages: 14,
+    excerpt:
+      'Outlines the background, objectives, and theoretical framework for a qualitative study of recent clinical laboratory technology graduates.',
+  },
+  {
+    id: 'george-washington-mural-debate',
+    title: 'The Debate over the George Washington Mural',
+    subject: 'Art History',
+    type: 'Critical Response',
+    level: 'University',
+    style: 'APA-style',
+    pages: 3,
+    excerpt:
+      'Weighs historical context, public impact, and artistic significance in the debate over preserving Victor Arnautoff’s mural.',
+  },
+  {
+    id: 'new-orleans-homicide-research',
+    title: 'Research on Homicide Rates in New Orleans',
+    subject: 'Criminology',
+    type: 'Annotated Bibliography',
+    level: 'University',
+    style: 'APA-style',
+    pages: 11,
+    excerpt:
+      'Summarizes research on homicide, neighborhood conditions, and violence prevention in New Orleans.',
+  },
+  {
+    id: 'mindfulness-and-student-stress',
+    title: 'Mindfulness Meditation and Student Stress',
+    subject: 'Research Methods',
+    type: 'Study Design',
+    level: 'University',
+    style: 'APA-style',
+    pages: 3,
+    excerpt:
+      'Uses the PICOT framework to design a proposed study of mindfulness meditation and stress among college students.',
+  },
 ]
 
 export type Review = { id: string; name: string; level: string; subject: string; rating: number; body: string; date: string; source: 'Trustpilot' | 'Sitejabber' | 'Verified order' }
