@@ -12,7 +12,7 @@ const markRead = (through: number) => markVisitorChatRead({ data: { through } })
 const greeting = 'Hi there, how can we help you?'
 const priceGreeting = 'Looking for a better price? Tell me what you need, and I’ll see what I can do.'
 const greetingDismissed = 'se-chat-greeting-dismissed'
-const greetingPlayed = 'se-chat-greeting-played'
+const alertPlayed = 'se-chat-pop-played'
 
 export function SupportChat({ onRead }: { onRead?: () => void }) {
   return (
@@ -38,13 +38,13 @@ export function ChatWidget() {
   const { data: availability, error } = useInboxData(getOnlineSupport, 30_000, showGreeting || open)
   const supportName = error ? null : availability?.name
 
-  const playGreeting = useCallback((replay = false) => {
+  const playAlert = useCallback((replay = false) => {
     const clip = audio.current
     if (!clip || playing.current || !clip.paused || document.hidden) return
     if (!replay) {
       if (played.current) return
       try {
-        if (sessionStorage.getItem(greetingPlayed)) return
+        if (sessionStorage.getItem(alertPlayed)) return
       } catch {
         // The in-memory flag still prevents repeat playback on this page.
       }
@@ -54,9 +54,9 @@ export function ChatWidget() {
     void clip.play().then(() => {
       played.current = true
       try {
-        sessionStorage.setItem(greetingPlayed, '1')
+        sessionStorage.setItem(alertPlayed, '1')
       } catch {
-        // Storage is optional for the greeting.
+        // Storage is optional for the alert.
       }
     }).catch(() => {
       // Playback can be retried from a user interaction.
@@ -79,12 +79,12 @@ export function ChatWidget() {
     if (!showGreeting || open) return
     function afterInteraction(event: MouseEvent) {
       if (event.target instanceof Element && event.target.closest('[data-chat-control]')) return
-      playGreeting()
+      playAlert()
     }
-    playGreeting()
+    playAlert()
     document.addEventListener('click', afterInteraction)
     return () => document.removeEventListener('click', afterInteraction)
-  }, [open, showGreeting, playGreeting])
+  }, [open, showGreeting, playAlert])
 
   function dismissGreeting() {
     window.clearTimeout(greetingTimer.current)
@@ -98,7 +98,7 @@ export function ChatWidget() {
 
   return (
     <div className="fixed right-4 bottom-4 z-40 sm:right-6 sm:bottom-6">
-      <audio ref={audio} src="/support-greeting.mp3" preload="none" />
+      <audio ref={audio} src="/chat-pop.mp3" preload="none" />
       {showGreeting && !open && (
         <aside
           aria-label="Live chat greeting"
@@ -123,9 +123,9 @@ export function ChatWidget() {
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Play chat greeting"
+                aria-label="Play chat alert"
                 data-chat-control
-                onClick={() => playGreeting(true)}
+                onClick={() => playAlert(true)}
               >
                 <Volume2 />
               </Button>
@@ -169,7 +169,7 @@ export function ChatWidget() {
         aria-controls={open ? 'support-chat' : undefined}
         data-chat-control
         onClick={() => {
-          if (!open) playGreeting()
+          if (!open) playAlert()
           dismissGreeting()
           setOpen(!open)
         }}

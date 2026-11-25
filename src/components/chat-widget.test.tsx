@@ -28,16 +28,20 @@ it("shows the available staff member and offers playback when autoplay is blocke
     )
     .mockResolvedValue(undefined);
 
-  render(<ChatWidget />);
+  const { container } = render(<ChatWidget />);
+  expect(container.querySelector("audio")).toHaveAttribute(
+    "src",
+    "/chat-pop.mp3",
+  );
 
   expect(
     await screen.findByText("Phoebe is online", {}, { timeout: 3000 }),
   ).toBeVisible();
   expect(screen.getByText(/Looking for a better price/)).toBeVisible();
   expect(play).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Play chat greeting" }));
+  fireEvent.click(screen.getByRole("button", { name: "Play chat alert" }));
   await waitFor(() =>
-    expect(sessionStorage.getItem("se-chat-greeting-played")).toBe("1"),
+    expect(sessionStorage.getItem("se-chat-pop-played")).toBe("1"),
   );
   expect(play).toHaveBeenCalledTimes(2);
 });
