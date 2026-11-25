@@ -85,6 +85,7 @@ export async function initializePaystackCheckout(
     reference: string
     callback_url: string
   },
+  cancelUrl = input.callback_url,
 ) {
   const result = z
     .object({
@@ -95,7 +96,7 @@ export async function initializePaystackCheckout(
       await paystackRequest('/transaction/initialize', key, {
         ...input,
         currency,
-        metadata: { cancel_action: input.callback_url },
+        metadata: { cancel_action: cancelUrl },
       }),
     )
   if (
@@ -158,7 +159,7 @@ export async function reconcilePayment(
   const [recorded] = await db
     .update(orders)
     .set({
-      status: sql`case when ${orders.status} = 'awaiting-payment' then 'paid' else ${orders.status} end`,
+      status: sql`case when ${orders.status} = 'awaiting-payment' then 'in-progress' else ${orders.status} end`,
       paidAt: now,
       updatedAt: now,
       dueAt: sql`case when ${orders.status} = 'awaiting-payment' then ${due.toISOString()}::timestamptz else ${orders.dueAt} end`,

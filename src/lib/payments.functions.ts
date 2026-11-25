@@ -22,11 +22,14 @@ export const startCheckout = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const config = paystackConfig()
     if (!config)
-      throw new Error('Online checkout is unavailable. Your order is saved. Please contact support.')
+      throw new Error('Online checkout is unavailable right now. Your order is saved.')
     const customer = { ...context.user, isAdmin: false }
     const order = await findAccessibleOrder(data.code, customer)
-    if (!order || !canCheckout(order))
-      throw new Error('This order isn’t awaiting payment.')
+    if (!order) throw new Error('Order not found.')
+    const callback = new URL('/dashboard', config.origin)
+    callback.searchParams.set('order', orderCode(order.id))
+    if (order.paidAt) return { url: callback.href }
+    if (!canCheckout(order)) throw new Error('This order is no longer eligible for payment.')
     const db = getDb()
     if (order.instructions.length < 20) {
       const [brief] = await db
@@ -36,7 +39,11 @@ export const startCheckout = createServerFn({ method: 'POST' })
         .limit(1)
       if (!brief) throw new Error('Upload your brief in the dashboard before paying.')
     }
-    if (order.paymentUrl) return { url: order.paymentUrl }
+    if (order.paymentUrl && order.paymentReference) {
+      // Reopen the same transaction so a retry cannot create a second charge.
+      const paid = await reconcilePayment(order.paymentReference)
+      return { url: paid ? callback.href : order.paymentUrl }
+    }
     const reference = order.paymentReference ?? `se-${randomUUID()}`
     if (!order.paymentReference) {
       const [reserved] = await db
@@ -54,15 +61,19 @@ export const startCheckout = createServerFn({ method: 'POST' })
         .returning({ id: orders.id })
       if (!reserved) throw new Error('The order changed while opening checkout. Refresh and try again.')
     }
-    const callback = new URL('/dashboard', config.origin)
-    callback.searchParams.set('order', orderCode(order.id))
+    const cancel = new URL(callback)
+    cancel.searchParams.set('paymentExit', 'closed')
     try {
-      const url = await initializePaystackCheckout(config.key, {
-        email: order.clientEmail,
-        amount: order.priceCents,
-        reference,
-        callback_url: callback.href,
-      })
+      const url = await initializePaystackCheckout(
+        config.key,
+        {
+          email: order.clientEmail,
+          amount: order.priceCents,
+          reference,
+          callback_url: callback.href,
+        },
+        cancel.href,
+      )
       await db
         .update(orders)
         .set({ paymentUrl: url })
@@ -70,9 +81,10 @@ export const startCheckout = createServerFn({ method: 'POST' })
       return { url }
     } catch {
       const current = await findAccessibleOrder(data.code, customer)
+      if (current?.paidAt) return { url: callback.href }
       if (current?.paymentUrl) return { url: current.paymentUrl }
       // Keep this reference on uncertain failures so a retry cannot charge another transaction.
-      throw new Error('Couldn’t open checkout. Try again or contact support with your order number.')
+      throw new Error('Couldn’t open checkout. Your order is saved.')
     }
   })
 

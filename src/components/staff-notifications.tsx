@@ -10,9 +10,10 @@ import {
   listStaffCustomers,
 } from "@/lib/customers.functions";
 import { sendCustomerNotification } from "@/lib/notifications.functions";
-import type { NotificationKind } from "@/lib/portal-notifications";
+import { notificationKinds } from "@/lib/portal-notifications";
 
 type Recipient = Awaited<ReturnType<typeof listStaffCustomers>>[number];
+type ManualNotificationKind = (typeof notificationKinds)[number];
 
 export function StaffNotifications({
   customerId,
@@ -27,7 +28,7 @@ export function StaffNotifications({
   const [loadingRecipient, setLoadingRecipient] = useState(Boolean(customerId));
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const [kind, setKind] = useState<NotificationKind>("notice");
+  const [kind, setKind] = useState<ManualNotificationKind>("notice");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -208,7 +209,7 @@ export function StaffNotifications({
                 className="h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm"
                 value={kind}
                 onChange={(event) =>
-                  setKind(event.target.value as NotificationKind)
+                  setKind(event.target.value as ManualNotificationKind)
                 }
               >
                 <option value="notice">Notification</option>

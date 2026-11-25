@@ -12,6 +12,7 @@ import {
   customerProfiles,
   orderMessages,
   orders,
+  staffAvatars,
 } from '../../db/schema'
 import { activeCustomer, touchCustomerPresence } from './customer-presence.server'
 import { findCustomerAccount } from './customers.server'
@@ -38,12 +39,14 @@ async function messagesFor(conversationId: string, guestOnly = false) {
       id: chatMessages.id,
       sender: chatMessages.sender,
       supportName: chatMessages.supportName,
+      supportAvatarId: staffAvatars.id,
       body: chatMessages.body,
       at: chatMessages.createdAt,
       readAt: chatMessages.readAt,
     })
     .from(chatMessages)
     .innerJoin(chatConversations, eq(chatMessages.conversationId, chatConversations.id))
+    .leftJoin(staffAvatars, eq(staffAvatars.userId, chatMessages.supportUserId))
     .where(and(eq(chatMessages.conversationId, conversationId), guestOnly ? isNull(chatConversations.userId) : undefined))
     .orderBy(desc(chatMessages.id))
     .limit(200)
@@ -400,6 +403,7 @@ export const sendSupportChat = createServerFn({ method: 'POST' })
           sender: 'agent',
           body: data.body,
           supportName,
+          supportUserId: context.user.id,
         })
     })
     return { ok: true }

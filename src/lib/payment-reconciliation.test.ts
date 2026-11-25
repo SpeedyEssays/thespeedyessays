@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const { db, recordPayment } = vi.hoisted(() => ({
   db: { select: vi.fn(), update: vi.fn() },
@@ -59,6 +60,11 @@ it("records a verified live USD payment on the existing order", async () => {
   expect(recordPayment).toHaveBeenCalledOnce();
   expect(recordPayment).toHaveBeenCalledWith(
     expect.objectContaining({ paidAt: expect.any(Date) }),
+  );
+  expect(
+    new PgDialect().sqlToQuery(recordPayment.mock.calls[0][0].status).sql,
+  ).toContain(
+    `when "orders"."status" = 'awaiting-payment' then 'in-progress' else "orders"."status"`,
   );
 });
 

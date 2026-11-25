@@ -3,7 +3,7 @@ import { and, desc, eq, exists, inArray, isNotNull, isNull, lte, sql } from 'dri
 import { z } from 'zod'
 
 import { getDb } from '../../db'
-import { customerNotifications, orderFiles, orderMessages, orders } from '../../db/schema'
+import { customerNotifications, orderFiles, orderMessages, orders, staffAvatars } from '../../db/schema'
 import { readCustomerProfile } from './customers.server'
 import { requireAdmin, requireUser } from './identity.functions'
 import {
@@ -340,6 +340,7 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
         orderId: order.id,
         sender: 'support',
         supportName: context.user.supportName,
+        supportUserId: context.user.id,
         body: `Support updated the order: ${changed.join(', ')}. See Order details for the current brief.`,
       })
     })
@@ -353,8 +354,17 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     const rows = await getDb()
-      .select()
+      .select({
+        id: orderMessages.id,
+        sender: orderMessages.sender,
+        supportName: orderMessages.supportName,
+        supportAvatarId: staffAvatars.id,
+        body: orderMessages.body,
+        createdAt: orderMessages.createdAt,
+        readAt: orderMessages.readAt,
+      })
       .from(orderMessages)
+      .leftJoin(staffAvatars, eq(staffAvatars.userId, orderMessages.supportUserId))
       .where(eq(orderMessages.orderId, order.id))
       .orderBy(desc(orderMessages.id))
       .limit(200)
@@ -362,6 +372,7 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
       id: m.id,
       sender: m.sender as OrderMessageView['sender'],
       supportName: m.supportName,
+      supportAvatarId: m.supportAvatarId,
       body: m.body,
       at: m.createdAt.toISOString(),
       readAt: m.readAt?.toISOString() ?? null,
@@ -425,6 +436,7 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
           orderId: order.id,
           sender: data.asSupport ? 'support' : 'client',
           supportName,
+          supportUserId: data.asSupport ? context.user.id : null,
           body: data.body,
         })
       await tx

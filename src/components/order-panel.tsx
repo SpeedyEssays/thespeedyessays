@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
 import { OrderFeedbackForm } from '@/components/order-feedback-form'
 import { AddFilePreview, OrderFileUpload } from '@/components/order-file-upload'
+import { OrderPayment } from '@/components/order-payment'
 import {
   approveOrder,
   getOrderMessages,
@@ -26,18 +27,15 @@ import {
 } from '@/lib/orders'
 import { assignmentTypeLabel, formatOrderLength, formatUSD, orderServices } from '@/lib/pricing'
 import { orderLanguages, orderSoftware } from '@/lib/order-requirements'
-import { refreshPayment, startCheckout } from '@/lib/payments.functions'
 
 export function OrderPanel({
   order,
   staff = false,
-  checkout = false,
   replyNotice,
   onRead,
 }: {
   order: OrderView
   staff?: boolean
-  checkout?: boolean
   replyNotice?: string
   onRead?: () => void
 }) {
@@ -142,53 +140,24 @@ export function OrderPanel({
         <p className="mt-1 text-sm">
           {formatUSD(order.price)} USD ·{' '}
           {!staff &&
-          checkout &&
           order.status === 'awaiting-payment' &&
           !order.agreedDueAt
             ? 'Deadline starts after payment'
             : `Due ${order.dueAt.slice(0, 16).replace('T', ' ')} UTC`}
         </p>
+        {(order.paidAt || payable) && (
+          <p className={`mt-1 text-sm font-medium ${order.paidAt ? 'text-success' : 'text-foreground'}`}>
+            {order.paidAt ? 'Payment confirmed' : 'Payment due'}
+          </p>
+        )}
         {order.instructions && (
           <p className="mt-3 whitespace-pre-wrap break-words text-sm">
             {order.instructions}
           </p>
         )}
       </div>
-      {!staff && checkout && payable && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const { url } = await startCheckout({
-                  data: { code: order.code },
-                })
-                window.location.assign(url)
-              })
-            }
-          >
-            Pay {formatUSD(order.price)} USD
-          </Button>
-          {order.checkoutStarted && (
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const { paid } = await refreshPayment({
-                    data: { code: order.code },
-                  })
-                  if (!paid)
-                    throw new Error('Payment has not been confirmed yet.')
-                  await router.invalidate()
-                  setNotice('Payment confirmed.')
-                })
-              }
-            >
-              Check payment status
-            </Button>
-          )}
-        </div>
+      {!staff && payable && (
+        <OrderPayment code={order.code} checkoutStarted={order.checkoutStarted} />
       )}
       <section
         aria-labelledby="customer-files"

@@ -3,11 +3,11 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb } from "../../db";
-import { customerNotifications } from "../../db/schema";
+import { customerNotifications, orders } from "../../db/schema";
 import { findCustomerAccount } from "./customers.server";
 import { requireAdmin, requireUser } from "./identity.functions";
 import { findAccessibleOrder } from "./order-records";
-import { orderCode } from "./orders";
+import { canCheckout, orderCode, orderIdFromCode } from "./orders";
 import { notificationKinds } from "./portal-notifications";
 
 export const listMyNotifications = createServerFn({ method: "GET" })
@@ -18,15 +18,28 @@ export const listMyNotifications = createServerFn({ method: "GET" })
     const rows = await getDb()
       .select({
         id: customerNotifications.id,
-        orderId: customerNotifications.orderId,
         kind: customerNotifications.kind,
         title: customerNotifications.title,
         body: customerNotifications.body,
         senderName: customerNotifications.senderName,
         createdAt: customerNotifications.createdAt,
         readAt: customerNotifications.readAt,
+        order: {
+          id: orders.id,
+          topic: orders.topic,
+          priceCents: orders.priceCents,
+          paidAt: orders.paidAt,
+          status: orders.status,
+        },
       })
       .from(customerNotifications)
+      .leftJoin(
+        orders,
+        and(
+          eq(orders.id, customerNotifications.orderId),
+          eq(orders.userId, customerNotifications.userId),
+        ),
+      )
       .where(eq(customerNotifications.userId, context.user.id))
       .orderBy(
         desc(customerNotifications.createdAt),
@@ -35,14 +48,77 @@ export const listMyNotifications = createServerFn({ method: "GET" })
       .limit(pageSize + 1)
       .offset(pageSize * data.page);
     return {
-      entries: rows.slice(0, pageSize).map((row) => ({
+      entries: rows.slice(0, pageSize).map(({ order, ...row }) => ({
         ...row,
-        orderCode: row.orderId ? orderCode(row.orderId) : null,
+        orderCode: order ? orderCode(order.id) : null,
+        payment:
+          order && row.kind === "payment-reminder"
+            ? {
+                topic: order.topic,
+                amount: order.priceCents / 100,
+                paid: Boolean(order.paidAt),
+                payable: canCheckout(order),
+              }
+            : null,
         createdAt: row.createdAt.toISOString(),
         readAt: row.readAt?.toISOString() ?? null,
       })),
       hasMore: rows.length > pageSize && data.page < 10000,
     };
+  });
+
+export const sendPaymentReminder = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(z.object({ code: z.string().max(20), requestId: z.uuid() }))
+  .handler(async ({ data, context }) => {
+    const id = orderIdFromCode(data.code);
+    if (!id) throw new Error("Order not found.");
+    return getDb().transaction(async (tx) => {
+      const [order] = await tx
+        .select({
+          userId: orders.userId,
+          status: orders.status,
+          paidAt: orders.paidAt,
+        })
+        .from(orders)
+        .where(eq(orders.id, id))
+        .for("update");
+      if (!order) throw new Error("Order not found.");
+      const [original] = await tx
+        .select({
+          userId: customerNotifications.userId,
+          orderId: customerNotifications.orderId,
+          kind: customerNotifications.kind,
+        })
+        .from(customerNotifications)
+        .where(eq(customerNotifications.id, data.requestId));
+      if (
+        original?.kind === "payment-reminder" &&
+        original.orderId === id &&
+        original.userId === order.userId
+      ) {
+        return { ok: true };
+      }
+      if (!canCheckout(order)) {
+        throw new Error("This order no longer has a payment due.");
+      }
+      const [sent] = await tx
+        .insert(customerNotifications)
+        .values({
+          id: data.requestId,
+          userId: order.userId,
+          orderId: id,
+          kind: "payment-reminder",
+          title: `Payment reminder for ${orderCode(id)}`,
+          body: "Use Complete payment to pay the balance on your order.",
+          senderName: context.user.supportName,
+        })
+        .onConflictDoNothing({ target: customerNotifications.id })
+        .returning();
+      if (!sent)
+        throw new Error("Couldn’t send this reminder. Refresh and try again.");
+      return { ok: true };
+    });
   });
 
 export const markNotificationsRead = createServerFn({ method: "POST" })

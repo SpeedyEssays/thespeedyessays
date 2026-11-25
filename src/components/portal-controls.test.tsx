@@ -1,13 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { AdminOrderView, OrderView } from "@/lib/orders";
+import { CustomerNotifications } from "./customer-notifications";
 import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
 import { StaffNotifications } from "./staff-notifications";
 import { StaffOrderStatus } from "./staff-order-status";
+import { StaffPaymentReminder } from "./staff-payment-reminder";
 
 const stubs = vi.hoisted(() => ({
   saveOrderFeedback: vi.fn(),
@@ -15,6 +18,9 @@ const stubs = vi.hoisted(() => ({
   listStaffCustomers: vi.fn(),
   getStaffCustomer: vi.fn(),
   sendCustomerNotification: vi.fn(),
+  sendPaymentReminder: vi.fn(),
+  listMyNotifications: vi.fn(),
+  startCheckout: vi.fn(),
   approveOrder: vi.fn(),
   requestRevision: vi.fn(),
   uploadOrderFile: vi.fn(),
@@ -24,6 +30,15 @@ const stubs = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   useRouter: () => ({ invalidate: stubs.invalidate }),
+  Link: ({
+    to,
+    search,
+    children,
+  }: {
+    to: string;
+    search: Record<string, string>;
+    children: ReactNode;
+  }) => <a href={`${to}?${new URLSearchParams(search)}`}>{children}</a>,
 }));
 vi.mock("@/components/chat-thread", () => ({ ChatThread: () => null }));
 vi.mock("@/lib/feedback.functions", () => ({
@@ -36,7 +51,7 @@ vi.mock("@/lib/orders.functions", () => ({
 }));
 vi.mock("@/lib/payments.functions", () => ({
   refreshPayment: vi.fn(),
-  startCheckout: vi.fn(),
+  startCheckout: stubs.startCheckout,
 }));
 vi.mock("@/lib/files.functions", () => ({
   uploadOrderFile: stubs.uploadOrderFile,
@@ -51,7 +66,10 @@ vi.mock("@/lib/customers.functions", () => ({
   getStaffCustomer: stubs.getStaffCustomer,
 }));
 vi.mock("@/lib/notifications.functions", () => ({
+  listMyNotifications: stubs.listMyNotifications,
+  markNotificationsRead: vi.fn(),
   sendCustomerNotification: stubs.sendCustomerNotification,
+  sendPaymentReminder: stubs.sendPaymentReminder,
 }));
 
 beforeEach(() => {
@@ -292,4 +310,89 @@ it("sends a portal offer only to the recipient selected by staff", async () => {
       body: "Ask us for this week’s offer.",
     },
   });
+});
+
+it.each(["awaiting-payment", "in-progress"] as const)(
+  "lets a customer retry payment for a saved %s order and contact support",
+  async (status) => {
+    const user = userEvent.setup();
+    const order = { ...deliveredOrder(), status, paidAt: null };
+    stubs.startCheckout
+      .mockRejectedValueOnce(new Error("Checkout is unavailable right now."))
+      .mockResolvedValueOnce({ url: "#checkout-retry" });
+    const { rerender } = render(<OrderPanel order={order} />);
+
+    await user.click(screen.getByRole("button", { name: "Complete payment" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Checkout is unavailable right now.",
+    );
+    expect(
+      screen.getByRole("link", { name: "contact support" }),
+    ).toHaveAttribute("href", `/dashboard?tab=chat&order=${order.code}`);
+    await user.click(screen.getByRole("button", { name: "Complete payment" }));
+    expect(stubs.startCheckout).toHaveBeenCalledTimes(2);
+    expect(stubs.startCheckout).toHaveBeenLastCalledWith({
+      data: { code: order.code },
+    });
+    expect(window.location.hash).toBe("#checkout-retry");
+
+    rerender(
+      <OrderPanel
+        order={{
+          ...order,
+          status: "in-progress",
+          paidAt: order.placedAt || order.updatedAt,
+        }}
+      />,
+    );
+    expect(screen.getByText("Payment confirmed")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Complete payment" }),
+    ).toBeNull();
+  },
+);
+
+it("lets staff send a payment reminder for the selected order", async () => {
+  const user = userEvent.setup();
+  stubs.sendPaymentReminder.mockResolvedValue({ ok: true });
+  render(<StaffPaymentReminder code="SE-48008" />);
+
+  await user.click(
+    screen.getByRole("button", { name: "Send payment reminder" }),
+  );
+  await screen.findByText(
+    "Payment reminder for SE-48008 sent to the customer portal.",
+  );
+  expect(stubs.sendPaymentReminder).toHaveBeenCalledExactlyOnceWith({
+    data: { code: "SE-48008", requestId: expect.any(String) },
+  });
+});
+
+it("shows a USD payment reminder and opens checkout for the linked order", async () => {
+  const user = userEvent.setup();
+  const entry = {
+    id: "reminder",
+    kind: "payment-reminder",
+    title: "Payment reminder for SE-48008",
+    senderName: "Marvin",
+    createdAt: "2026-11-25T22:00:00.000Z",
+    orderCode: "SE-48008",
+    payment: { topic: "Demo order", paid: false, payable: true, amount: 8.96 },
+  };
+  stubs.listMyNotifications.mockResolvedValue({
+    entries: [entry],
+    hasMore: false,
+  });
+  stubs.startCheckout.mockResolvedValue({ url: "#order-reminder-checkout" });
+  render(<CustomerNotifications unread={1} onRead={vi.fn()} />);
+
+  expect(
+    await screen.findByText("Payment reminder for SE-48008"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Amount due · $8.96 USD")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Complete payment" }));
+  expect(stubs.startCheckout).toHaveBeenCalledExactlyOnceWith({
+    data: { code: "SE-48008" },
+  });
+  expect(window.location.hash).toBe("#order-reminder-checkout");
 });

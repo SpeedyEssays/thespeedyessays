@@ -1,13 +1,15 @@
 import { useCallback, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Bell, CheckCheck, Gift } from "lucide-react";
+import { Bell, CheckCheck, CreditCard, Gift } from "lucide-react";
 
 import { LocalTime } from "@/components/local-time";
+import { OrderPayment } from "@/components/order-payment";
 import { Button } from "@/components/ui/button";
 import {
   listMyNotifications,
   markNotificationsRead,
 } from "@/lib/notifications.functions";
+import { formatUSD } from "@/lib/pricing";
 import { useInboxData } from "@/lib/use-inbox-data";
 import { cn } from "@/lib/utils";
 
@@ -122,7 +124,12 @@ function NotificationPage({
       {data && data.entries.length > 0 && (
         <ul className="space-y-3">
           {data.entries.map((entry) => {
-            const Icon = entry.kind === "offer" ? Gift : Bell;
+            const paymentReminder = entry.kind === "payment-reminder";
+            const Icon = paymentReminder
+              ? CreditCard
+              : entry.kind === "offer"
+                ? Gift
+                : Bell;
             return (
               <li
                 key={entry.id}
@@ -144,7 +151,11 @@ function NotificationPage({
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="font-semibold text-foreground">
-                      {entry.kind === "offer" ? "Offer" : "Update"}
+                      {paymentReminder
+                        ? "Payment reminder"
+                        : entry.kind === "offer"
+                          ? "Offer"
+                          : "Update"}
                     </span>
                     {!entry.readAt && (
                       <span className="rounded-full bg-primary px-2 py-0.5 font-medium text-primary-foreground">
@@ -156,9 +167,31 @@ function NotificationPage({
                   <h3 className="break-words font-sans text-base font-semibold tracking-normal">
                     {entry.title}
                   </h3>
-                  <p className="whitespace-pre-wrap break-words text-sm">
-                    {entry.body}
-                  </p>
+                  {entry.payment ? (
+                    <div className="space-y-1 text-sm">
+                      <p className="break-words">{entry.payment.topic}</p>
+                      <p className="font-medium">
+                        {entry.payment.paid
+                          ? "Payment confirmed"
+                          : entry.payment.payable
+                            ? "Amount due"
+                            : "Order cancelled"}
+                        {" · "}
+                        {formatUSD(entry.payment.amount)} USD
+                      </p>
+                    </div>
+                  ) : !paymentReminder ? (
+                    <p className="whitespace-pre-wrap break-words text-sm">
+                      {entry.body}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      This order is no longer available.
+                    </p>
+                  )}
+                  {entry.payment?.payable && entry.orderCode && (
+                    <OrderPayment code={entry.orderCode} />
+                  )}
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                     {entry.senderName && (
                       <span className="break-words text-xs text-muted-foreground">

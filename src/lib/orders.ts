@@ -199,6 +199,7 @@ export type OrderMessageView = {
   id: number
   sender: 'client' | 'support'
   supportName: string | null
+  supportAvatarId: string | null
   body: string
   at: string
   readAt: string | null

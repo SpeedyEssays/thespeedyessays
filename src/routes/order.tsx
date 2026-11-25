@@ -273,7 +273,8 @@ function OrderPage() {
           </p>
           {placed.checkoutFailed && (
             <p className="mt-3 text-sm text-destructive" role="alert">
-              We couldn’t open checkout. You can retry payment from your saved order.
+              We couldn’t open checkout. You can try again from your saved order. Please contact
+              support if checkout still fails.
             </p>
           )}
           {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them from the order in your customer portal. {placed.failedFiles.join(', ')}</p>}

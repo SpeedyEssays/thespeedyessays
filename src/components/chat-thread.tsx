@@ -3,11 +3,13 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { customerGreeting, supportSenderLabel, withoutCustomerGreeting } from '@/lib/customer-greeting'
 import { LocalTime } from './local-time'
+import { StaffAvatar } from './staff-avatar'
 
 type Message = {
   id: number
   sender: string
   supportName: string | null
+  supportAvatarId?: string | null
   body: string
   at: string
   readAt?: string | null
@@ -175,8 +177,11 @@ export function ChatThread({
               : ownMessage ? ownLabel : otherLabel
             return (
               <li key={message.id} className={`rounded-md p-2 ${ownMessage ? 'bg-secondary' : 'bg-card'}`}>
-                <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-x-3">
-                  <p className="text-xs font-semibold">{label}</p>
+                <div className="mb-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {fromSupport && <StaffAvatar avatarId={message.supportAvatarId} name={message.supportName} />}
+                    <p className="break-words text-xs font-semibold">{label}</p>
+                  </div>
                   <LocalTime at={message.at} className="text-xs text-muted-foreground" />
                 </div>
                 {fromSupport && <p className="mb-2 text-sm">{customerGreeting}</p>}

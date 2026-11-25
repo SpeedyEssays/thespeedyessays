@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  bytea,
   check,
   index,
   integer,
@@ -112,7 +113,7 @@ export const customerNotifications = pgTable.withRLS(
     readAt: timestamp('read_at', { withTimezone: true }),
   },
   (t) => [
-    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer')`),
+    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer', 'payment-reminder')`),
     index('customer_notifications_user_sent_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
     index('customer_notifications_unread_idx').on(t.userId).where(sql`${t.readAt} is null`),
     index('customer_notifications_order_idx').on(t.orderId),
@@ -154,6 +155,7 @@ export const orderMessages = pgTable(
       .references(() => orders.id, { onDelete: 'cascade' }),
     sender: text().notNull(), // 'client' | 'support'
     supportName: text('support_name'),
+    supportUserId: text('support_user_id'),
     body: text().notNull(),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -204,6 +206,7 @@ export const chatMessages = pgTable(
       .references(() => chatConversations.id, { onDelete: 'cascade' }),
     sender: text().notNull(), // 'visitor' | 'agent'
     supportName: text('support_name'),
+    supportUserId: text('support_user_id'),
     body: text().notNull(),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -242,3 +245,11 @@ export const staffPresence = pgTable.withRLS('staff_presence', {
   supportName: text('support_name').notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
 })
+
+export const staffAvatars = pgTable.withRLS('staff_avatars', {
+  userId: text('user_id').primaryKey(),
+  id: uuid().notNull().unique(),
+  jpeg: bytea().notNull(),
+}, (t) => [
+  check('staff_avatars_size_valid', sql`octet_length(${t.jpeg}) between 5 and 262144`),
+])

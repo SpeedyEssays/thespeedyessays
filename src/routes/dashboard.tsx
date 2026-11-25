@@ -16,8 +16,8 @@ import { getMyDisplayName } from '@/lib/customers.functions'
 import { getCustomerInboxCounts } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
-import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
-import { statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
+import { refreshPayment } from '@/lib/payments.functions'
+import { canCheckout, statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
 
@@ -46,9 +46,10 @@ const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { order?: string; reference?: string; tab?: 'chat' | 'notifications' } => ({
+  ): { order?: string; reference?: string; paymentExit?: 'closed'; tab?: 'chat' | 'notifications' } => ({
     tab: search.tab === 'chat' || search.tab === 'notifications' ? search.tab : undefined,
     order: typeof search.order === 'string' ? search.order : undefined,
+    paymentExit: search.paymentExit === 'closed' ? 'closed' : undefined,
     reference:
       typeof search.reference === 'string' &&
       /^se-[0-9a-f-]{36}$/.test(search.reference)
@@ -65,12 +66,11 @@ export const Route = createFileRoute('/dashboard')({
     return { user }
   },
   loader: async () => {
-    const [orders, checkout, displayName] = await Promise.all([
+    const [orders, displayName] = await Promise.all([
       listMyOrders(),
-      isCheckoutAvailable(),
       getMyDisplayName(),
     ])
-    return { orders, checkout, displayName }
+    return { orders, displayName }
   },
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({
@@ -86,8 +86,8 @@ function Dashboard() {
   const { user } = Route.useRouteContext()
   useCustomerActivity(!user.isAdmin)
   const { data: counts, refresh: refreshUnread } = useInboxData(getCustomerInboxCounts)
-  const { orders, checkout, displayName } = Route.useLoaderData()
-  const { order, reference, tab } = Route.useSearch()
+  const { orders, displayName } = Route.useLoaderData()
+  const { order, reference, paymentExit, tab } = Route.useSearch()
   const router = useRouter()
   const [paymentNotice, setPaymentNotice] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -101,11 +101,11 @@ function Dashboard() {
       const { paid } = await refreshPayment({ data: { reference } })
       await router.invalidate()
       setPaymentNotice(
-        paid ? 'Payment confirmed.' : 'Payment has not been confirmed yet.',
+        paid ? 'Payment confirmed.' : 'Paystack hasn’t confirmed the payment yet.',
       )
     } catch {
       setPaymentNotice(
-        'Payment confirmation is temporarily unavailable. Try refreshing the status shortly.',
+        'Payment confirmation is temporarily unavailable. Please refresh the status or contact support.',
       )
     } finally {
       setVerifying(false)
@@ -114,13 +114,18 @@ function Dashboard() {
 
   useEffect(() => {
     if (!reference) return
+    let active = true
     void refreshPayment({ data: { reference } }).then(
-      () => router.invalidate(),
-      () =>
-        setPaymentNotice(
-          'Payment confirmation is still pending. You can refresh the status below.',
-        ),
+      ({ paid }) => {
+        if (!active) return
+        setPaymentNotice(paid ? 'Payment confirmed.' : 'Paystack hasn’t confirmed the payment yet.')
+        void router.invalidate()
+      },
+      () => {
+        if (active) setPaymentNotice('Payment confirmation is still pending. Please refresh the status or contact support.')
+      },
     )
+    return () => { active = false }
   }, [reference, router])
 
   return (
@@ -183,6 +188,15 @@ function Dashboard() {
         </section>
       ) : (
         <>
+          {paymentExit === 'closed' && selected && selected.code === order && canCheckout(selected) && (
+            <p role="status" className="mb-5 rounded-lg border bg-card p-3 text-sm">
+              Checkout closed. Your order is saved. Select Complete payment to try again or{' '}
+              <Link to="/dashboard" search={{ tab: 'chat', order }} className="font-medium underline underline-offset-2">
+                contact support
+              </Link>{' '}
+              for help.
+            </p>
+          )}
           {reference && (
             <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
               <Button
@@ -216,7 +230,6 @@ function Dashboard() {
               <OrderPanel
                 key={selected.code}
                 order={selected}
-                checkout={checkout}
                 onRead={refreshUnread}
               />
             </div>

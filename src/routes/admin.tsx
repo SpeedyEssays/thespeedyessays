@@ -5,7 +5,7 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, CreditCard, MessageSquare, Package, Shield, Star, Users } from 'lucide-react'
+import { Bell, CreditCard, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
@@ -20,7 +20,9 @@ import { StaffOrderEmail } from '@/components/staff-order-email'
 import { StaffFeedback } from '@/components/staff-feedback'
 import { StaffNotifications } from '@/components/staff-notifications'
 import { StaffOrderStatus } from '@/components/staff-order-status'
+import { StaffPaymentReminder } from '@/components/staff-payment-reminder'
 import { StaffPaymentTest } from '@/components/staff-payment-test'
+import { StaffProfile } from '@/components/staff-profile'
 import {
   getStaffInboxCounts,
   listSupportChats,
@@ -29,8 +31,9 @@ import {
   sendSupportChat,
 } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
-import { statusMeta, type AdminOrderView } from '@/lib/orders'
+import { canCheckout, statusMeta, type AdminOrderView } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
+import { getMyStaffAvatar } from '@/lib/staff-avatar.functions'
 import { recordStaffActivity } from '@/lib/staff-presence.functions'
 import { supportNameRequired } from '@/lib/support-name'
 import { useVisibleActivity } from '@/lib/use-customer-activity'
@@ -39,7 +42,7 @@ import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
   tab: z
-    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins', 'payment-test'])
+    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins', 'payment-test', 'profile'])
     .optional()
     .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
@@ -54,6 +57,7 @@ const staffPages = [
   { key: 'customers', label: 'Customers', Icon: Users },
   { key: 'feedback', label: 'Feedback', Icon: Star },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
+  { key: 'profile', label: 'My profile', Icon: UserRound },
   { key: 'payment-test', label: 'Payment test', Icon: CreditCard },
   { key: 'admins', label: 'Admins', Icon: Shield },
 ] as const
@@ -76,10 +80,12 @@ export const Route = createFileRoute('/admin')({
     return { canManageStaff: user.canManageStaff, supportName: user.supportName }
   },
   loaderDeps: ({ search }) => ({ tab: search.tab, customer: search.customer }),
-  loader: ({ deps }) =>
-    deps.tab === 'orders'
-      ? listStaffOrders({ data: { customerId: deps.customer } })
+  loader: async ({ deps }) => ({
+    orders: deps.tab === 'orders'
+      ? await listStaffOrders({ data: { customerId: deps.customer } })
       : [],
+    avatarId: deps.tab === 'profile' ? await getMyStaffAvatar() : null,
+  }),
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({
     meta: [
@@ -92,7 +98,7 @@ export const Route = createFileRoute('/admin')({
 
 function Admin() {
   const { tab = 'chat', customer, chat, order, testRef } = Route.useSearch()
-  const orders = Route.useLoaderData()
+  const { orders, avatarId } = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
   useVisibleActivity(recordStaffActivity, Boolean(supportName))
   const { data: counts, refresh: refreshUnread } = useInboxData(getStaffInboxCounts)
@@ -142,6 +148,7 @@ function Admin() {
       )}
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
       {tab === 'feedback' && <StaffFeedback />}
+      {tab === 'profile' && <StaffProfile avatarId={avatarId} supportName={supportName} />}
       {tab === 'payment-test' && <StaffPaymentTest key={testRef ?? 'new'} reference={testRef} />}
       {tab === 'notifications' && <StaffNotifications key={`${customer ?? ''}:${order ?? ''}`} customerId={customer} orderCode={order} />}
       {tab === 'orders' && (
@@ -281,6 +288,7 @@ function StaffOrders({
                 </Button>
               </div>
             </div>
+            {canCheckout(order) && <StaffPaymentReminder code={order.code} />}
             <StaffOrderStatus
               key={`${order.status}:${order.checkoutStarted}`}
               order={order}

@@ -45,6 +45,52 @@ it.each(["client", "support"])(
   },
 );
 
+it.each(["agent", "support"])(
+  "shows the avatar of the specific staff member in a %s chat",
+  async (sender) => {
+    const at = "2026-11-21T14:05:00.000Z";
+    render(
+      <ChatThread
+        load={async () => [
+          {
+            id: 1,
+            sender,
+            supportName: "Marvin",
+            supportAvatarId: "first-avatar",
+            body: "First reply",
+            at,
+          },
+          {
+            id: 2,
+            sender,
+            supportName: "Dora",
+            supportAvatarId: "second-avatar",
+            body: "Second reply",
+            at,
+          },
+          { id: 3, sender, supportName: "Scarlett", body: "Earlier reply", at },
+        ]}
+        send={vi.fn()}
+        ownSender={sender === "agent" ? "visitor" : "client"}
+        otherLabel="Support"
+        emptyText="No messages"
+      />,
+    );
+    const first = (await screen.findByText("Marvin Support:")).closest("li");
+    const second = screen.getByText("Dora Support:").closest("li");
+    const earlier = screen.getByText("Scarlett Support:").closest("li");
+    expect(first?.querySelector("img")).toHaveAttribute(
+      "src",
+      "/api/staff-avatar/first-avatar",
+    );
+    expect(second?.querySelector("img")).toHaveAttribute(
+      "src",
+      "/api/staff-avatar/second-avatar",
+    );
+    expect(earlier?.querySelector("img")).toBeNull();
+  },
+);
+
 it.each(["client", "support"])(
   "shows delivery and read receipts and marks the thread read for the %s",
   async (ownSender) => {
@@ -55,9 +101,30 @@ it.each(["client", "support"])(
     render(
       <ChatThread
         load={async () => [
-          { id: 1, sender: ownSender, supportName: null, body: "Opened", at, readAt: at },
-          { id: 2, sender: ownSender, supportName: null, body: "Waiting", at, readAt: null },
-          { id: 3, sender: otherSender, supportName: null, body: "New reply", at, readAt: null },
+          {
+            id: 1,
+            sender: ownSender,
+            supportName: null,
+            body: "Opened",
+            at,
+            readAt: at,
+          },
+          {
+            id: 2,
+            sender: ownSender,
+            supportName: null,
+            body: "Waiting",
+            at,
+            readAt: null,
+          },
+          {
+            id: 3,
+            sender: otherSender,
+            supportName: null,
+            body: "New reply",
+            at,
+            readAt: null,
+          },
         ]}
         send={vi.fn()}
         markRead={markRead}
