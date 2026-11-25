@@ -7,10 +7,20 @@ import {
   currency,
   initializePaystackCheckout,
   paystackRequest,
+  PaystackRequestError,
 } from "./payments.server";
 
 const testAmount = 2000;
 const testReference = z.string().regex(/^se-test-[0-9a-f-]{36}$/);
+
+const testRejectionMessage = {
+  currency:
+    "Paystack has not enabled USD for this test account. Ask Paystack to enable USD in Test Mode.",
+  credentials:
+    "Paystack rejected the Test Secret Key. Copy the key from the correct Paystack business in Test Mode and update PAYSTACK_TEST_SECRET_KEY in Cloudflare.",
+  channels:
+    "Paystack has no active method for this USD test. Check Cards under Paystack Dashboard → Settings → Preferences.",
+};
 
 function testKey() {
   const key = process.env.PAYSTACK_TEST_SECRET_KEY;
@@ -30,14 +40,24 @@ export const startUsdPaymentTest = createServerFn({ method: "POST" })
     const callback = new URL("/admin", getRequestUrl().origin);
     callback.searchParams.set("tab", "payment-test");
     callback.searchParams.set("testRef", reference);
-    return {
-      url: await initializePaystackCheckout(key, {
-        email: context.user.email,
-        amount: testAmount,
-        reference,
-        callback_url: callback.href,
-      }),
-    };
+    try {
+      return {
+        url: await initializePaystackCheckout(key, {
+          email: context.user.email,
+          amount: testAmount,
+          reference,
+          callback_url: callback.href,
+        }),
+      };
+    } catch (error) {
+      if (!(error instanceof PaystackRequestError)) throw error;
+      throw new Error(
+        error.reason === "unknown"
+          ? `Paystack declined to open the USD test (HTTP ${error.status}). Check your test account settings or contact Paystack support.`
+          : testRejectionMessage[error.reason],
+        { cause: error },
+      );
+    }
   });
 
 export const verifyUsdPaymentTest = createServerFn({ method: "GET" })

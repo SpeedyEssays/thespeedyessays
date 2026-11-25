@@ -67,7 +67,7 @@ The service listens on `0.0.0.0` at the host's `PORT` (3000 locally). On Render,
 
 For a sandbox check, save the `sk_test_` secret as `PAYSTACK_TEST_SECRET_KEY` and open **Staff portal → Payment test**. The page verifies the USD test directly with Paystack without recording a payment on a customer order.
 
-For live checkout, complete Paystack business approval and save the `sk_live_` secret as `PAYSTACK_SECRET_KEY`. Set the live webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash.
+For live checkout, complete Paystack business approval, enable USD and the eligible payment methods in Paystack, and save the `sk_live_` secret as `PAYSTACK_SECRET_KEY`. Set the live webhook to `/api/paystack-webhook` on the deployed site. Checkout returns to `SITE_ORIGIN`, with `PAYSTACK_CALLBACK_ORIGIN` available as an override. Set either value to the site's HTTPS origin without a trailing slash. Orders are recorded as Awaiting payment before customers open checkout.
 
 ### Order notification email
 

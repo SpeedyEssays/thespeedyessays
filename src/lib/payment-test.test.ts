@@ -57,7 +57,7 @@ it("does not enable public checkout with a test key", () => {
   });
 });
 
-it("opens a USD card test using the test key and returns to the staff portal", async () => {
+it("opens a USD test with the account's eligible methods and returns to the staff portal", async () => {
   const fetch = vi.fn(async (_url: string, request: RequestInit) => {
     const data = JSON.parse(String(request.body));
     expect(request.headers).toMatchObject({
@@ -66,9 +66,10 @@ it("opens a USD card test using the test key and returns to the staff portal", a
     expect(data).toMatchObject({
       currency: "USD",
       amount: 2000,
-      channels: ["card"],
       email: staff.email,
     });
+    expect(data).not.toHaveProperty("channels");
+    expect(data.metadata).toEqual({ cancel_action: data.callback_url });
     expect(new URL(data.callback_url).pathname).toBe("/admin");
     expect(new URL(data.callback_url).searchParams.get("testRef")).toBe(
       data.reference,
@@ -89,6 +90,37 @@ it("rejects a live key in the test setting", async () => {
   await expect(startUsdPaymentTest()).rejects.toThrow(
     "Paystack Test Secret Key",
   );
+});
+
+it.each([
+  [400, "Currency not supported by merchant", "Paystack has not enabled USD"],
+  [401, "Invalid key", "Paystack rejected the Test Secret Key"],
+  [
+    400,
+    "No active channel to process transaction",
+    "Paystack has no active method",
+  ],
+  [403, "A private detail from the provider", "HTTP 403"],
+] as const)(
+  "explains a Paystack test rejection (HTTP %i, %s)",
+  async (status, message, expected) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ status: false, message }, { status }),
+        ),
+    );
+    await expect(startUsdPaymentTest()).rejects.toThrow(expected);
+  },
+);
+
+it("uses the configured site origin for live checkout without an override", () => {
+  vi.stubEnv("PAYSTACK_SECRET_KEY", "sk_live_example");
+  vi.stubEnv("PAYSTACK_CALLBACK_ORIGIN", "");
+  vi.stubEnv("SITE_ORIGIN", "https://speedyessays.example.test");
+  expect(paystackConfig()?.origin).toBe("https://speedyessays.example.test");
 });
 
 it("confirms only the expected USD test payment for the signed-in staff account", async () => {

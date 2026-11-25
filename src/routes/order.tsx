@@ -16,7 +16,7 @@ import { OrderLanguageField, OrderSoftwareField } from '@/components/order-requi
 import { getServerUser } from '@/lib/identity.functions'
 import { uploadOrderFile } from '@/lib/files.functions'
 import { createOrder } from '@/lib/orders.functions'
-import { isCheckoutAvailable } from '@/lib/payments.functions'
+import { isCheckoutAvailable, startCheckout } from '@/lib/payments.functions'
 import { checkOrderFile, MAX_ORDER_FILES_PER_UPLOAD, orderFileAccept } from '@/lib/orders'
 import {
   orderLanguages,
@@ -119,7 +119,11 @@ function OrderPage() {
   const [step, setStep] = useState(0)
   const { user } = Route.useRouteContext()
   useCustomerActivity(!user.isAdmin)
-  const [placed, setPlaced] = useState<{ code: string; failedFiles: string[] } | null>(null)
+  const [placed, setPlaced] = useState<{
+    code: string
+    failedFiles: string[]
+    checkoutFailed: boolean
+  } | null>(null)
   const submission = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -195,7 +199,7 @@ function OrderPage() {
     set('files', [...form.files, ...files])
   }
 
-  async function next() {
+  async function next(continueToPayment: boolean) {
     if (busy || !validate(step)) return
     if (step < steps.length - 1) {
       setStep(step + 1)
@@ -240,7 +244,16 @@ function OrderPage() {
           failedFiles.push(file.name)
         }
       }
-      setPlaced({ code, failedFiles })
+      let checkoutFailed = false
+      if (continueToPayment && failedFiles.length === 0) {
+        try {
+          const { url } = await startCheckout({ data: { code } })
+          window.location.assign(url)
+        } catch {
+          checkoutFailed = true
+        }
+      }
+      setPlaced({ code, failedFiles, checkoutFailed })
     } catch {
       toast.error('Your order couldn’t be saved. Check your details or try again.')
     } finally {
@@ -255,8 +268,14 @@ function OrderPage() {
           <CheckCircle2 className="mx-auto size-14 text-success" />
           <h1 className="mt-6 text-4xl font-semibold">Order {placed.code} saved</h1>
           <p className="mt-4 text-muted-foreground">
-            Open your order in the customer portal to view its status, messages and files.
+            Your order is listed under Awaiting payment. Return to it in your customer portal when
+            you’re ready to pay.
           </p>
+          {placed.checkoutFailed && (
+            <p className="mt-3 text-sm text-destructive" role="alert">
+              We couldn’t open checkout. You can retry payment from your saved order.
+            </p>
+          )}
           {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them from the order in your customer portal. {placed.failedFiles.join(', ')}</p>}
           <div className="mt-8 flex justify-center gap-3">
             <Button asChild>
@@ -311,7 +330,7 @@ function OrderPage() {
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            next()
+            void next(checkout)
           }}
           className="rounded-2xl border bg-card p-6 sm:p-8"
         >
@@ -543,7 +562,9 @@ function OrderPage() {
               </dl>
               <p className="text-sm">
                 Ordering as <span className="font-medium">{user.email}</span>.{' '}
-                {checkout ? 'Open the saved order to check out.' : 'You can view the order and contact support after placing it.'}
+                {checkout
+                  ? 'Choose whether to pay now or return to the saved order later.'
+                  : 'You can view the saved order and contact support from your customer portal.'}
               </p>
               <div>
                 <Label htmlFor="agree" className="flex items-start gap-3 font-normal">
@@ -560,21 +581,26 @@ function OrderPage() {
             </div>
           )}
 
-          <div className="mt-8 flex items-center justify-between gap-3 border-t pt-6">
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t pt-6">
             <Button type="button" variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={busy || step === 0}>
               <ArrowLeft /> Back
             </Button>
-            <Button type="submit" size="lg" disabled={busy}>
-              {step === steps.length - 1 ? (
-                <>
-                  {busy ? 'Placing order…' : 'Place order'}
-                </>
-              ) : (
-                <>
-                  Continue <ArrowRight />
-                </>
+            <div className="flex flex-wrap gap-3">
+              {step === steps.length - 1 && checkout && (
+                <Button type="button" variant="outline" size="lg" disabled={busy} onClick={() => void next(false)}>
+                  Save and pay later
+                </Button>
               )}
-            </Button>
+              <Button type="submit" size="lg" disabled={busy}>
+                {step === steps.length - 1 ? (
+                  busy ? 'Saving order…' : checkout ? 'Continue to payment' : 'Save order'
+                ) : (
+                  <>
+                    Continue <ArrowRight />
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </form>
 
