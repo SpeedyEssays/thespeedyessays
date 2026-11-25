@@ -1,11 +1,11 @@
-import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
 import { OrderFeedbackForm } from '@/components/order-feedback-form'
-import { uploadOrderFile } from '@/lib/files.functions'
+import { AddFilePreview, OrderFileUpload } from '@/components/order-file-upload'
 import {
   approveOrder,
   getOrderMessages,
@@ -15,16 +15,12 @@ import {
 } from '@/lib/orders.functions'
 import {
   canCheckout,
-  canCustomerReadFile,
-  checkOrderFile,
   fileKindLabels,
+  fileRequiresApproval,
   formatBytes,
-  MAX_ORDER_FILES_PER_UPLOAD,
-  orderFileAccept,
-  revisionRequestStatuses,
+  orderRevisionDeadline,
   staffFileKinds,
   statusMeta,
-  type FileKind,
   type OrderFileView,
   type OrderView,
 } from '@/lib/orders'
@@ -52,11 +48,19 @@ export function OrderPanel({
   const [problem, setProblem] = useState('')
   const [notice, setNotice] = useState('')
   const [revision, setRevision] = useState('')
-  const [kind, setKind] = useState<FileKind>(staff ? 'final' : 'brief')
-  const fileInput = useRef<HTMLInputElement>(null)
-  const [filesToUpload, setFilesToUpload] = useState<
-    { file: File; id: string }[]
-  >([])
+  const [showRevision, setShowRevision] = useState(false)
+  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
+  const deadline = orderRevisionDeadline(order)
+  const revisionExpired = order.revisionStatus === 'expired' ||
+    (order.revisionStatus === 'available' && deadline !== null && expiredDeadline === deadline)
+  const canRevise = order.revisionStatus === 'available' && !revisionExpired
+
+  useEffect(() => {
+    if (order.revisionStatus !== 'available' || deadline === null) return
+    const timer = window.setTimeout(() => setExpiredDeadline(deadline), Math.max(0, deadline - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [deadline, order.revisionStatus])
+
   const load = useCallback(
     () => getOrderMessages({ data: { code: order.code } }),
     [order.code],
@@ -93,64 +97,6 @@ export function OrderPanel({
     }
   }
 
-  function selectFiles(files: File[]) {
-    setNotice('')
-    if (
-      files.length > MAX_ORDER_FILES_PER_UPLOAD ||
-      files.some((file) => !checkOrderFile(file))
-    ) {
-      setProblem(
-        'Choose up to eight supported files, each no larger than 4 MB.',
-      )
-      setFilesToUpload([])
-      if (fileInput.current) fileInput.current.value = ''
-      return
-    }
-    setProblem('')
-    setFilesToUpload(files.map((file) => ({ file, id: crypto.randomUUID() })))
-  }
-
-  async function upload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!filesToUpload.length || busy) return
-    setBusy(true)
-    setProblem('')
-    setNotice('')
-    try {
-      const failed: typeof filesToUpload = []
-      for (const selection of filesToUpload) {
-        const data = new FormData()
-        data.set('code', order.code)
-        data.set('kind', kind)
-        data.set('file', selection.file)
-        data.set('uploadId', selection.id)
-        try {
-          await uploadOrderFile({ data })
-        } catch {
-          failed.push(selection)
-        }
-      }
-      setFilesToUpload(failed)
-      if (fileInput.current) fileInput.current.value = ''
-      if (failed.length) {
-        setProblem(
-          `Couldn’t upload: ${failed.map(({ file }) => file.name).join(', ')}. You can retry these files.`,
-        )
-      }
-      if (failed.length !== filesToUpload.length) {
-        const uploaded = filesToUpload.length - failed.length
-        setNotice(
-          uploaded === 1 ? 'File uploaded.' : `${uploaded} files uploaded.`,
-        )
-        await router.invalidate()
-      }
-    } catch {
-      setProblem('Files were saved. Refresh the order to update the list.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const payable = canCheckout(order)
   const active = !['cancelled', 'completed', 'approved'].includes(order.status)
   const customerFiles = order.files.filter((file) => file.kind === 'brief')
@@ -168,59 +114,7 @@ export function OrderPanel({
     order.status === 'completed' &&
     Boolean(order.deliveredAt) &&
     staffFiles.some((file) => file.kind === 'final')
-  const uploadForm = (staff ? order.status !== 'cancelled' : active) && (
-    <form className="space-y-2" onSubmit={(event) => void upload(event)}>
-      {staff && (
-        <div className="space-y-2">
-          <Label htmlFor="order-file-type">File type</Label>
-          <select
-            id="order-file-type"
-            className="block rounded border bg-background px-2 py-1 text-sm"
-            value={kind}
-            disabled={busy}
-            onChange={(event) => setKind(event.target.value as FileKind)}
-          >
-            {staffFileKinds.map((type) => (
-              <option key={type} value={type}>
-                {fileKindLabels[type]}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      <Label htmlFor="order-upload">
-        {staff ? 'Choose files for this customer' : 'Choose supporting files'}
-      </Label>
-      <Input
-        ref={fileInput}
-        id="order-upload"
-        type="file"
-        accept={orderFileAccept}
-        multiple
-        disabled={busy}
-        onChange={(event) => selectFiles(Array.from(event.target.files ?? []))}
-      />
-      <p className="text-xs text-muted-foreground">
-        Up to eight files at a time, 4 MB each.
-        {staff &&
-          !canCustomerReadFile(kind, order.deliveredAt) &&
-          ' These files become visible when you mark the order delivered.'}
-      </p>
-      {filesToUpload.length > 0 && (
-        <p className="break-words text-sm">
-          {filesToUpload.map(({ file }) => file.name).join(', ')}
-        </p>
-      )}
-      <Button
-        variant="outline"
-        size="sm"
-        type="submit"
-        disabled={busy || !filesToUpload.length}
-      >
-        {busy ? 'Uploading…' : 'Upload files'}
-      </Button>
-    </form>
-  )
+  const hasPreview = staffFiles.some((file) => file.kind === 'final' && file.access === 'preview')
 
   return (
     <section
@@ -307,7 +201,7 @@ export function OrderPanel({
           {staff ? 'Customer uploads' : 'Your uploads'}
         </h3>
         {customerFiles.length > 0 ? (
-          <OrderFileList files={customerFiles} />
+          <OrderFileList files={customerFiles} code={order.code} staff={staff} />
         ) : (
           <p className="text-sm text-muted-foreground">
             {staff
@@ -315,7 +209,7 @@ export function OrderPanel({
               : 'You haven’t uploaded any files yet.'}
           </p>
         )}
-        {!staff && uploadForm}
+        {!staff && active && <OrderFileUpload code={order.code} staff={false} />}
       </section>
       <section
         aria-labelledby="staff-files"
@@ -334,29 +228,82 @@ export function OrderPanel({
         {deliveries.map(({ type, files }) => (
           <div key={type} className="space-y-2">
             <h4 className="text-sm font-semibold">{fileKindLabels[type]}</h4>
-            {staff && !canCustomerReadFile(type, order.deliveredAt) && (
-              <p className="text-xs text-muted-foreground">
-                Visible to the customer after delivery.
-              </p>
-            )}
-            <OrderFileList files={files} />
+            <OrderFileList files={files} code={order.code} staff={staff} />
           </div>
         ))}
-        {otherFiles.length > 0 && <OrderFileList files={otherFiles} />}
-        {staff && uploadForm}
-        {showApproval && (
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void run(
-                () => approveOrder({ data: { code: order.code } }),
-                'Order approved. You can leave feedback below.',
-              )
-            }
-          >
-            Approve order
-          </Button>
+        {otherFiles.length > 0 && <OrderFileList files={otherFiles} code={order.code} staff={staff} />}
+        {staff && order.status !== 'cancelled' && <OrderFileUpload code={order.code} staff />}
+        {!staff && (showApproval || canRevise || revisionExpired) && (
+          <div className="space-y-3 border-t pt-4">
+            {showApproval && (
+              <p className="text-sm text-muted-foreground">
+                {hasPreview
+                  ? 'Review the watermarked preview, then approve to unlock the clean copy.'
+                  : 'Approve the order to unlock the clean copy. You can message support for a preview.'}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {showApproval && (
+                <Button
+                  className="bg-success text-white hover:bg-success/90"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(
+                      () => approveOrder({ data: { code: order.code, deliveryVersion: order.deliveryVersion } }),
+                      'Order approved. Your clean files are ready to download.',
+                    )
+                  }
+                >
+                  Approve order
+                </Button>
+              )}
+              {canRevise && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={busy}
+                  aria-expanded={showRevision}
+                  onClick={() => setShowRevision((open) => !open)}
+                >
+                  Request a revision
+                </Button>
+              )}
+            </div>
+            {revisionExpired && (
+              <p className="text-sm text-muted-foreground">
+                The 14-day revision window has ended. Contact support in Order messages for help.
+              </p>
+            )}
+            {canRevise && showRevision && (
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void run(async () => {
+                    await requestRevision({
+                      data: { code: order.code, deliveryVersion: order.deliveryVersion, notes: revision },
+                    })
+                    setRevision('')
+                    setShowRevision(false)
+                  }, 'Revision requested.')
+                }}
+              >
+                <Label htmlFor="revision-notes">What needs to change?</Label>
+                <Textarea
+                  id="revision-notes"
+                  minLength={10}
+                  maxLength={5000}
+                  rows={3}
+                  value={revision}
+                  onChange={(event) => setRevision(event.target.value)}
+                  required
+                />
+                <Button size="sm" variant="destructive" type="submit" disabled={busy}>
+                  Send revision request
+                </Button>
+              </form>
+            )}
+          </div>
         )}
       </section>
       {problem && (
@@ -371,33 +318,6 @@ export function OrderPanel({
       )}
       {!staff && allowApproval && order.approvedAt && (
         <OrderFeedbackForm code={order.code} feedback={order.feedback} />
-      )}
-      {!staff && revisionRequestStatuses.includes(order.status) && (
-        <form
-          className="space-y-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void run(async () => {
-              await requestRevision({
-                data: { code: order.code, notes: revision },
-              })
-              setRevision('')
-            }, 'Revision requested.')
-          }}
-        >
-          <Label htmlFor="revision-notes">Revision notes</Label>
-          <Input
-            id="revision-notes"
-            minLength={10}
-            maxLength={3000}
-            value={revision}
-            onChange={(event) => setRevision(event.target.value)}
-            required
-          />
-          <Button size="sm" variant="outline" disabled={busy}>
-            Request a revision
-          </Button>
-        </form>
       )}
       <section className="space-y-3">
         <h3 className="text-lg font-semibold">
@@ -419,30 +339,49 @@ export function OrderPanel({
   )
 }
 
-function OrderFileList({ files }: { files: OrderFileView[] }) {
+function OrderFileList({ files, code, staff }: { files: OrderFileView[]; code: string; staff: boolean }) {
   return (
     <ul className="space-y-2">
-      {files.map((file) => (
-        <li
-          key={file.id}
-          className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2"
-        >
-          <div className="min-w-0">
-            <p className="break-words text-sm font-medium">{file.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {formatBytes(file.size)}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href={`/api/files/${file.id}`}
-              aria-label={`Download ${file.name}`}
-            >
-              Download
-            </a>
-          </Button>
-        </li>
-      ))}
+      {files.map((file) => {
+        const protectedFile = fileRequiresApproval(file.kind)
+        const href = `/api/files/${file.id}`
+        const previewLink = file.hasPreview && (staff || file.access === 'preview')
+        const originalLink = staff || file.access === 'original'
+        return (
+          <li key={file.id} className="space-y-2 rounded-md border bg-card px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-medium">{file.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatBytes(file.size)}
+                  {file.access === 'pending' && ' · Waiting for delivery'}
+                  {file.access === 'preview' && ' · Watermarked preview'}
+                  {file.access === 'locked' && ' · Preview needed'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {previewLink && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={`${href}?preview=1`} target="_blank" rel="noopener" aria-label={`Open preview of ${file.name}`}>
+                      Open preview
+                    </a>
+                  </Button>
+                )}
+                {originalLink && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={href} aria-label={`Download ${file.name}`}>
+                      {protectedFile ? staff ? 'Download original' : 'Download clean copy' : 'Download'}
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+            {staff && protectedFile && !file.hasPreview && file.access !== 'original' && (
+              <AddFilePreview file={file} code={code} />
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }

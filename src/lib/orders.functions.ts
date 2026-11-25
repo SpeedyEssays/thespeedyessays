@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { and, desc, eq, exists, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { and, desc, eq, exists, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { getDb } from '../../db'
@@ -18,11 +18,12 @@ import {
   SOFTWARE_FEE_CENTS,
 } from './order-requirements'
 import {
+  approvalFileKinds,
   canChangeUnpaidQuote,
+  customerRevisionStatus,
   orderCode,
+  orderRevisionDeadline,
   orderStatuses,
-  REVISION_WINDOW_DAYS,
-  revisionRequestStatuses,
   staffOrderStatuses,
   statusMeta,
   type OrderMessageView,
@@ -170,14 +171,16 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
       code: z.string().max(20),
       status: z.enum(staffOrderStatuses),
       currentStatus: z.enum(orderStatuses),
+      deliveryVersion: z.number().int().nonnegative().optional(),
     }),
   )
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     const { status } = data
-    if (status === order.status) return { ok: true }
-    if (order.status !== data.currentStatus)
+    if (status === order.status && status !== 'completed') return { ok: true }
+    if (order.status !== data.currentStatus ||
+      (data.deliveryVersion !== undefined && data.deliveryVersion !== order.deliveryVersion))
       throw new Error('The order was updated elsewhere. Refresh and try again.')
     if (status === 'cancelled' && !canChangeUnpaidQuote({
       paidAt: order.paidAt,
@@ -191,6 +194,14 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
     const fileKind = status === 'completed' ? 'final' : status === 'draft-ready' ? 'paper' : null
     const now = new Date()
     await getDb().transaction(async (tx) => {
+      const pendingDelivery = and(
+        eq(orderFiles.orderId, order.id),
+        inArray(orderFiles.kind, approvalFileKinds),
+        isNull(orderFiles.deliveredAt),
+      )
+      const redelivery = status === 'completed' && order.status === 'completed'
+      const pendingFiles = tx.select({ id: orderFiles.id }).from(orderFiles).where(pendingDelivery)
+      if (redelivery && !(await pendingFiles.limit(1)).length) return
       const file = fileKind && tx.select({ id: orderFiles.id }).from(orderFiles).where(
         and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, fileKind)),
       )
@@ -199,11 +210,14 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
           status,
           updatedAt: now,
           ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
-          ...(status === 'completed' ? { deliveredAt: now } : {}),
+          ...(status === 'completed'
+            ? { deliveredAt: now, deliveryVersion: sql`${orders.deliveryVersion} + 1` }
+            : {}),
         })
         .where(and(
           eq(orders.id, order.id),
           eq(orders.status, data.currentStatus),
+          eq(orders.deliveryVersion, order.deliveryVersion),
           status === 'paid' ? isNotNull(orders.paidAt) : undefined,
           status === 'cancelled' || status === 'awaiting-payment' ? isNull(orders.paidAt) : undefined,
           status === 'cancelled' ? isNull(orders.paymentReference) : undefined,
@@ -217,6 +231,14 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
             : 'Upload a draft before marking this order draft ready.')
         throw new Error('The order was updated elsewhere. Refresh and try again.')
       }
+      if (status === 'completed') {
+        const [needsPreview] = await tx.select({ id: orderFiles.id })
+          .from(orderFiles)
+          .where(and(pendingDelivery, isNull(orderFiles.previewBlobKey)))
+          .limit(1)
+        if (needsPreview) throw new Error('Add a watermarked preview to each new final or soft copy before delivery.')
+        await tx.update(orderFiles).set({ deliveredAt: now }).where(pendingDelivery)
+      }
       const reopened = order.status === 'cancelled'
       const code = orderCode(order.id)
       await tx.insert(customerNotifications).values({
@@ -225,7 +247,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
         kind: 'notice',
         title: reopened ? `Order ${code} reopened` : `Order ${code} · ${statusMeta[status].label}`,
         body: status === 'completed'
-          ? 'Your final copy is ready. Open your order to download and review it.'
+          ? 'Your final delivery is ready. Open your order to review it. Approve to unlock the clean copy, or request a revision within 14 days.'
           : `The status of your order is now ${statusMeta[status].label.toLowerCase()}.`,
         senderName: context.user.supportName,
       })
@@ -415,43 +437,50 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
 
 export const approveOrder = createServerFn({ method: 'POST' })
   .middleware([requireUser])
-  .validator(z.object({ code: z.string().max(20) }))
+  .validator(z.object({ code: z.string().max(20), deliveryVersion: z.number().int().nonnegative() }))
   .handler(async ({ data, context }) => {
     if (context.user.isAdmin)
       throw new Error('Only the customer can approve this order.')
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
+    if (data.deliveryVersion !== order.deliveryVersion)
+      throw new Error('A newer delivery is available. Refresh the order to review it.')
     if (order.status === 'approved') return { ok: true }
 
-    const db = getDb()
-    const finalCopy = db
-      .select({ id: orderFiles.id })
-      .from(orderFiles)
-      .where(
-        and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, 'final')),
-      )
-    const [approved] = await db
-      .update(orders)
-      .set({
-        status: 'approved',
-        approvedAt: sql`coalesce(${orders.approvedAt}, now())`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
+    await getDb().transaction(async (tx) => {
+      const finalCopy = tx.select({ id: orderFiles.id }).from(orderFiles).where(and(
+        eq(orderFiles.orderId, order.id),
+        eq(orderFiles.kind, 'final'),
+        isNotNull(orderFiles.deliveredAt),
+      ))
+      const [approved] = await tx.update(orders)
+        .set({
+          status: 'approved',
+          approvedAt: sql`coalesce(${orders.approvedAt}, now())`,
+          updatedAt: sql`now()`,
+        })
+        .where(and(
           eq(orders.id, order.id),
           eq(orders.userId, context.user.id),
           eq(orders.status, 'completed'),
+          eq(orders.deliveryVersion, data.deliveryVersion),
           isNotNull(orders.deliveredAt),
           exists(finalCopy),
-        ),
-      )
-      .returning({ id: orders.id })
-    if (!approved) {
-      throw new Error(
-        'The order must be completed with a delivered final copy. Refresh the order and try again.',
-      )
-    }
+        ))
+        .returning({ id: orders.id })
+      if (!approved) {
+        const [current] = await tx.select({ status: orders.status, version: orders.deliveryVersion })
+          .from(orders).where(and(eq(orders.id, order.id), eq(orders.userId, context.user.id)))
+        if (current?.status === 'approved' && current.version === data.deliveryVersion) return
+        throw new Error('The delivery changed. Refresh the order and review it before approving.')
+      }
+      await tx.update(orderFiles).set({ releasedAt: sql`now()` }).where(and(
+        eq(orderFiles.orderId, order.id),
+        inArray(orderFiles.kind, approvalFileKinds),
+        isNotNull(orderFiles.deliveredAt),
+        isNull(orderFiles.releasedAt),
+      ))
+    })
     return { ok: true }
   })
 
@@ -460,6 +489,7 @@ export const requestRevision = createServerFn({ method: 'POST' })
   .validator(
     z.object({
       code: z.string().max(20),
+      deliveryVersion: z.number().int().nonnegative(),
       notes: z.string().trim().min(10).max(5000),
     }),
   )
@@ -469,16 +499,14 @@ export const requestRevision = createServerFn({ method: 'POST' })
       isAdmin: false,
     })
     if (!order) throw new Error('Order not found.')
-    const delivered = order.deliveredAt ?? order.updatedAt
-    if (
-      (order.status === 'completed' || order.status === 'approved') &&
-      Date.now() > delivered.getTime() + REVISION_WINDOW_DAYS * 86400000
-    ) {
-      throw new Error('The 14-day revision window has ended.')
-    }
-    if (!revisionRequestStatuses.includes(order.status)) {
+    if (data.deliveryVersion !== order.deliveryVersion)
+      throw new Error('A newer delivery is available. Refresh the order to review it.')
+    const revisionStatus = customerRevisionStatus(order)
+    if (revisionStatus === 'expired')
+      throw new Error('The 14-day revision window has ended. Contact support for help.')
+    if (revisionStatus === 'unavailable')
       throw new Error('Revisions open once your draft is delivered.')
-    }
+    const deadline = orderRevisionDeadline(order)
     await getDb().transaction(async (tx) => {
       const [updated] = await tx
         .update(orders)
@@ -487,8 +515,16 @@ export const requestRevision = createServerFn({ method: 'POST' })
           updatedAt: new Date(),
           ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
         })
-        .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
+        .where(and(
+          eq(orders.id, order.id),
+          eq(orders.userId, context.user.id),
+          eq(orders.status, order.status),
+          eq(orders.deliveryVersion, data.deliveryVersion),
+          deadline === null ? undefined : sql`clock_timestamp() < to_timestamp(${deadline / 1000}::double precision)`,
+        ))
         .returning({ id: orders.id })
+      if (!updated && customerRevisionStatus(order) === 'expired')
+        throw new Error('The 14-day revision window has ended. Contact support for help.')
       if (!updated)
         throw new Error(
           'An order update is already in progress. Refresh and try again.',

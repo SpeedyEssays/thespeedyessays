@@ -13,7 +13,7 @@ export const saveOrderFeedback = createServerFn({ method: "POST" })
   .validator(
     z.object({
       code: z.string().max(20),
-      rating: z.number().int().min(1).max(5),
+      rating: z.number().int().min(0).max(5),
       comment: z.string().trim().max(5000),
     }),
   )

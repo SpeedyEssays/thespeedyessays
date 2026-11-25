@@ -61,14 +61,42 @@ export const fileKindLabels: Record<FileKind, string> = {
   material: 'Supporting file',
 }
 
-export function canCustomerReadFile(
-  kind: string,
-  deliveredAt: Date | string | null,
-) {
-  return (kind !== 'final' && kind !== 'soft-copy') || Boolean(deliveredAt)
+export const approvalFileKinds = ['final', 'soft-copy'] as const
+
+export function fileRequiresApproval(kind: string) {
+  return approvalFileKinds.some((type) => type === kind)
+}
+
+export function customerFileAccess(file: {
+  kind: string
+  deliveredAt: Date | null
+  releasedAt: Date | null
+  previewBlobKey: string | null
+}) {
+  if (!fileRequiresApproval(file.kind) || file.releasedAt) return 'original'
+  if (!file.deliveredAt) return 'pending'
+  return file.previewBlobKey ? 'preview' : 'locked'
 }
 
 export const revisionRequestStatuses = ['draft-ready', 'completed', 'approved']
+
+type RevisionOrder = {
+  status: string
+  deliveredAt: Date | string | null
+  updatedAt: Date | string
+}
+
+export function orderRevisionDeadline(order: RevisionOrder) {
+  const delivered = order.deliveredAt ??
+    (order.status === 'completed' || order.status === 'approved' ? order.updatedAt : null)
+  return delivered === null ? null : new Date(delivered).getTime() + REVISION_WINDOW_DAYS * 86_400_000
+}
+
+export function customerRevisionStatus(order: RevisionOrder, now = Date.now()) {
+  if (!revisionRequestStatuses.includes(order.status)) return 'unavailable'
+  const deadline = orderRevisionDeadline(order)
+  return deadline !== null && now >= deadline ? 'expired' : 'available'
+}
 
 export function canCheckout(order: {
   status: string
@@ -112,6 +140,8 @@ export type OrderFileView = {
   name: string
   size: number
   createdAt: string
+  access: ReturnType<typeof customerFileAccess>
+  hasPreview: boolean
 }
 
 export type OrderFeedbackView = {
@@ -146,6 +176,8 @@ export type OrderView = {
   paymentMethod: string
   paidAt: string | null
   deliveredAt: string | null
+  deliveryVersion: number
+  revisionStatus: ReturnType<typeof customerRevisionStatus>
   approvedAt: string | null
   feedback: OrderFeedbackView | null
   checkoutStarted: boolean

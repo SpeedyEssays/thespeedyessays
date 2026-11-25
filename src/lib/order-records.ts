@@ -5,12 +5,14 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { getDb } from '../../db'
 import { orderFeedback, orderFiles, orderMessages, orders } from '../../db/schema'
 import {
-  canCustomerReadFile,
+  customerFileAccess,
+  customerRevisionStatus,
   orderCode,
   orderIdFromCode,
   type AdminOrderView,
   type FileKind,
   type OrderFeedbackView,
+  type OrderFileView,
   type OrderStatus,
   type OrderView,
 } from './orders'
@@ -59,24 +61,25 @@ function toView(
     checkoutStarted: !!row.paymentReference,
     paidAt: row.paidAt?.toISOString() ?? null,
     deliveredAt: row.deliveredAt?.toISOString() ?? null,
+    deliveryVersion: row.deliveryVersion,
+    revisionStatus: customerRevisionStatus(row),
     approvedAt: (row.approvedAt ?? (row.status === 'approved' ? row.updatedAt : null))?.toISOString() ?? null,
     feedback,
     status: row.status as OrderStatus,
     originalityScore: row.originalityScore,
     instructions: row.instructions,
     files: files
-      .filter(
-        (f) =>
-          f.orderId === row.id &&
-          (staff || canCustomerReadFile(f.kind, row.deliveredAt)),
-      )
-      .map((f) => ({
+      .filter((f) => f.orderId === row.id)
+      .map<OrderFileView>((f) => ({
         id: f.id,
         kind: f.kind as FileKind,
         name: f.name,
         size: f.size,
         createdAt: f.createdAt.toISOString(),
-      })),
+        access: customerFileAccess(f),
+        hasPreview: Boolean(f.previewBlobKey),
+      }))
+      .filter((file) => staff || file.access !== 'pending'),
   }
 }
 

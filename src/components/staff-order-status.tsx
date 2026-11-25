@@ -24,6 +24,13 @@ export function StaffOrderStatus({
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const undelivered = order.files.filter((file) => file.access === "pending");
+  const deliverAgain =
+    target === "completed" &&
+    order.status === "completed" &&
+    undelivered.length > 0;
+  const needsPreview =
+    target === "completed" && undelivered.some((file) => !file.hasPreview);
   const choices = staffOrderStatuses.filter((status) => {
     if (status === order.status) return true;
     if (status === "cancelled") return canChangeUnpaidQuote(order);
@@ -38,14 +45,15 @@ export function StaffOrderStatus({
         ? "paper"
         : null;
   const missingFile =
-    target !== order.status &&
+    (target !== order.status || deliverAgain) &&
     fileNeeded &&
     !order.files.some((file) => file.kind === fileNeeded);
   const canSave =
     target !== "approved" &&
-    target !== order.status &&
+    (target !== order.status || deliverAgain) &&
     choices.includes(target) &&
-    !missingFile;
+    !missingFile &&
+    !needsPreview;
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,9 +62,20 @@ export function StaffOrderStatus({
     setProblem("");
     try {
       await updateOrderStatus({
-        data: { code: order.code, status: target, currentStatus: order.status },
+        data: {
+          code: order.code,
+          status: target,
+          currentStatus: order.status,
+          deliveryVersion: order.deliveryVersion,
+        },
       });
-      await onSaved(reopened ? "Order reopened." : "Order status saved.");
+      await onSaved(
+        target === "completed"
+          ? "Delivery sent."
+          : reopened
+            ? "Order reopened."
+            : "Order status saved.",
+      );
     } catch (error) {
       setProblem(
         error instanceof Error
@@ -99,7 +118,15 @@ export function StaffOrderStatus({
           ))}
         </select>
         <Button type="submit" size="sm" disabled={busy || !canSave}>
-          {busy ? "Saving…" : reopened ? "Reopen order" : "Save status"}
+          {busy
+            ? "Saving…"
+            : deliverAgain
+              ? "Deliver new files"
+              : target === "completed"
+                ? "Mark as delivered"
+                : reopened
+                  ? "Reopen order"
+                  : "Save status"}
         </Button>
       </div>
       {reopened && (
@@ -112,6 +139,12 @@ export function StaffOrderStatus({
           {fileNeeded === "final"
             ? "Upload the final copy before marking this order delivered."
             : "Upload a draft before marking this order draft ready."}
+        </p>
+      )}
+      {needsPreview && (
+        <p className="text-xs text-muted-foreground">
+          Use Add preview beside each new final or soft copy before delivering
+          it.
         </p>
       )}
       {problem && (

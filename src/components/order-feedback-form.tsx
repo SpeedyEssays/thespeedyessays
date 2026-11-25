@@ -8,7 +8,7 @@ import { saveOrderFeedback } from "@/lib/feedback.functions";
 import type { OrderFeedbackView } from "@/lib/orders";
 import { cn } from "@/lib/utils";
 
-const ratings = [1, 2, 3, 4, 5];
+const ratings = [0, 1, 2, 3, 4, 5];
 
 export function OrderFeedbackForm({
   code,
@@ -18,7 +18,7 @@ export function OrderFeedbackForm({
   feedback: OrderFeedbackView | null;
 }) {
   const [saved, setSaved] = useState(feedback);
-  const [rating, setRating] = useState(feedback?.rating ?? 0);
+  const [rating, setRating] = useState<number | null>(feedback?.rating ?? null);
   const [comment, setComment] = useState(feedback?.comment ?? "");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -26,7 +26,7 @@ export function OrderFeedbackForm({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !rating) return;
+    if (busy || rating === null) return;
     setBusy(true);
     setNotice("");
     setProblem("");
@@ -84,15 +84,28 @@ export function OrderFeedbackForm({
                   required
                 />
                 <span className="grid size-10 place-items-center rounded-md hover:bg-card peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
-                  <Star
-                    aria-hidden="true"
-                    className={cn(
-                      "size-6",
-                      value <= rating
-                        ? "fill-accent text-accent-foreground"
-                        : "text-muted-foreground",
-                    )}
-                  />
+                  {value === 0 ? (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "rounded border px-1.5 text-sm font-semibold",
+                        rating === 0 &&
+                          "border-primary bg-primary text-primary-foreground",
+                      )}
+                    >
+                      0
+                    </span>
+                  ) : (
+                    <Star
+                      aria-hidden="true"
+                      className={cn(
+                        "size-6",
+                        rating !== null && value <= rating
+                          ? "fill-accent text-accent-foreground"
+                          : "text-muted-foreground",
+                      )}
+                    />
+                  )}
                 </span>
                 <span className="sr-only">
                   {value} {value === 1 ? "star" : "stars"}
@@ -103,7 +116,7 @@ export function OrderFeedbackForm({
               aria-hidden="true"
               className="ml-2 text-sm text-muted-foreground"
             >
-              {rating ? `${rating} of 5` : "Select a rating"}
+              {rating === null ? "Select a rating" : `${rating} of 5`}
             </span>
           </div>
         </fieldset>
@@ -122,7 +135,7 @@ export function OrderFeedbackForm({
           />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" disabled={busy || !rating}>
+          <Button type="submit" size="sm" disabled={busy || rating === null}>
             {busy ? "Saving…" : saved ? "Update feedback" : "Save feedback"}
           </Button>
           {notice && (

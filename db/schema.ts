@@ -29,6 +29,7 @@ export const orders = pgTable(
     paymentUrl: text('payment_url'),
     paidAt: timestamp('paid_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    deliveryVersion: integer('delivery_version').notNull().default(0),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     type: text().notNull(),
     service: text().$type<OrderService>().notNull().default('writing'),
@@ -90,7 +91,7 @@ export const orderFeedback = pgTable.withRLS(
       .defaultNow(),
   },
   (t) => [
-    check('order_feedback_rating_valid', sql`${t.rating} between 1 and 5`),
+    check('order_feedback_rating_valid', sql`${t.rating} between 0 and 5`),
     index('order_feedback_updated_idx').on(t.updatedAt.desc(), t.orderId.desc()),
   ],
 )
@@ -130,11 +131,17 @@ export const orderFiles = pgTable(
     size: integer().notNull(),
     contentType: text('content_type').notNull(),
     blobKey: text('blob_key').notNull().unique(),
+    previewBlobKey: text('preview_blob_key'),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (t) => [index('order_files_order_id_idx').on(t.orderId)],
+  (t) => [
+    index('order_files_order_id_idx').on(t.orderId),
+    check('order_files_release_after_delivery', sql`${t.releasedAt} is null or ${t.deliveredAt} is not null`),
+  ],
 )
 
 // Per-order thread between the client and the support team.
