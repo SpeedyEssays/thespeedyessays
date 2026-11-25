@@ -18,9 +18,10 @@ export const saveOrderFeedback = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
-    if (context.user.isAdmin)
-      throw new Error("Only the customer can rate this order.");
-    const order = await findAccessibleOrder(data.code, context.user);
+    const order = await findAccessibleOrder(data.code, {
+      id: context.user.id,
+      isAdmin: false,
+    });
     if (!order || (!order.approvedAt && order.status !== "approved"))
       throw new Error("Approve this order before leaving feedback.");
     const { rating, comment } = data;

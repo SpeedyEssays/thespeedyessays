@@ -32,14 +32,12 @@ export function OrderPanel({
   order,
   staff = false,
   checkout = false,
-  allowApproval = false,
   replyNotice,
   onRead,
 }: {
   order: OrderView
   staff?: boolean
   checkout?: boolean
-  allowApproval?: boolean
   replyNotice?: string
   onRead?: () => void
 }) {
@@ -110,7 +108,6 @@ export function OrderPanel({
   const otherFiles = staffFiles.filter((file) => !fileKindLabels[file.kind])
   const showApproval =
     !staff &&
-    allowApproval &&
     order.status === 'completed' &&
     Boolean(order.deliveredAt) &&
     staffFiles.some((file) => file.kind === 'final')
@@ -316,7 +313,7 @@ export function OrderPanel({
           {notice}
         </p>
       )}
-      {!staff && allowApproval && order.approvedAt && (
+      {!staff && order.approvedAt && (
         <OrderFeedbackForm code={order.code} feedback={order.feedback} />
       )}
       <section className="space-y-3">

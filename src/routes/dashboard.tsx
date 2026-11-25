@@ -217,7 +217,6 @@ function Dashboard() {
                 key={selected.code}
                 order={selected}
                 checkout={checkout}
-                allowApproval={!user.isAdmin}
                 onRead={refreshUnread}
               />
             </div>

@@ -196,7 +196,7 @@ it("offers the preview and a red revision action alongside approval, then shows 
   const user = userEvent.setup();
   const order = deliveredOrder();
   stubs.approveOrder.mockResolvedValue({ ok: true });
-  const { rerender } = render(<OrderPanel order={order} allowApproval />);
+  const { rerender } = render(<OrderPanel order={order} />);
 
   expect(
     screen.getByRole("link", { name: "Open preview of Final.docx" }),
@@ -220,7 +220,6 @@ it("offers the preview and a red revision action alongside approval, then shows 
   );
   rerender(
     <OrderPanel
-      allowApproval
       order={{
         ...order,
         status: "approved",
@@ -239,12 +238,7 @@ it("offers the preview and a red revision action alongside approval, then shows 
 
 it("removes the customer revision action after the window closes and keeps approval available", () => {
   const order = deliveredOrder();
-  render(
-    <OrderPanel
-      order={{ ...order, revisionStatus: "expired" }}
-      allowApproval
-    />,
-  );
+  render(<OrderPanel order={{ ...order, revisionStatus: "expired" }} />);
   expect(
     screen.queryByRole("button", { name: "Request a revision" }),
   ).not.toBeInTheDocument();
@@ -252,6 +246,13 @@ it("removes the customer revision action after the window closes and keeps appro
     screen.getByText(/The 14-day revision window has ended/),
   ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Approve order" })).toBeEnabled();
+});
+
+it("keeps approval out of the staff view of a delivered order", () => {
+  render(<OrderPanel order={deliveredOrder()} staff />);
+  expect(
+    screen.queryByRole("button", { name: "Approve order" }),
+  ).not.toBeInTheDocument();
 });
 
 it("sends a portal offer only to the recipient selected by staff", async () => {
