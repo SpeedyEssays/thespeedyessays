@@ -2,18 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { MessageCircle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ChatThread } from '@/components/chat-thread'
-import { readVisitorChat, sendVisitorChat } from '@/lib/chat.functions'
+import { markVisitorChatRead, readVisitorChat, sendVisitorChat } from '@/lib/chat.functions'
 
 const load = () => readVisitorChat()
 const send = (body: string) => sendVisitorChat({ data: { body } })
+const markRead = (through: number) => markVisitorChatRead({ data: { through } })
 const greeting = 'Hi! Let us know how we can help.'
 const greetingDismissed = 'se-chat-greeting-dismissed'
 
-export function SupportChat() {
+export function SupportChat({ onRead }: { onRead?: () => void }) {
   return (
     <ChatThread
       load={load}
       send={send}
+      markRead={markRead}
+      onRead={onRead}
       ownSender="visitor"
       otherLabel="Support"
       emptyText={greeting}

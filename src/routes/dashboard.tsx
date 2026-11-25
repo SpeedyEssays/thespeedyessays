@@ -6,15 +6,18 @@ import {
   useRouter,
 } from '@tanstack/react-router'
 import { PortalShell } from '@/components/portal-shell'
+import { UnreadBadge } from '@/components/chat-indicators'
 import { SupportChat } from '@/components/chat-widget'
 import { Button } from '@/components/ui/button'
 import { OrderPanel } from '@/components/order-panel'
 import { getMyDisplayName } from '@/lib/customers.functions'
+import { getCustomerInboxCounts } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
 import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
 import { statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
+import { useInboxData } from '@/lib/use-inbox-data'
 
 const orderGroupLabels = {
   'awaiting-payment': 'Orders awaiting payment',
@@ -80,6 +83,7 @@ export const Route = createFileRoute('/dashboard')({
 function Dashboard() {
   const { user } = Route.useRouteContext()
   useCustomerActivity(!user.isAdmin)
+  const { data: counts, refresh: refreshUnread } = useInboxData(getCustomerInboxCounts)
   const { orders, checkout, displayName } = Route.useLoaderData()
   const { order, reference, tab } = Route.useSearch()
   const router = useRouter()
@@ -122,9 +126,12 @@ function Dashboard() {
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-4xl font-semibold">Customer portal</h1>
-          <p className="mt-2 break-all text-sm text-muted-foreground">
-            {displayName || user.name || user.email}
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <p className="break-all text-sm text-muted-foreground">
+              {displayName || user.name || user.email}
+            </p>
+            <UnreadBadge count={(counts?.website ?? 0) + (counts?.ordersTotal ?? 0)} />
+          </div>
         </div>
         <Button asChild>
           <Link to="/order">New order</Link>
@@ -140,7 +147,7 @@ function Dashboard() {
             search={{ order }}
             aria-current={tab ? undefined : 'page'}
           >
-            My orders
+            My orders <UnreadBadge count={counts?.ordersTotal} />
           </Link>
         </Button>
         <Button variant={tab === 'chat' ? 'default' : 'ghost'} asChild>
@@ -149,7 +156,7 @@ function Dashboard() {
             search={{ tab: 'chat', order }}
             aria-current={tab === 'chat' ? 'page' : undefined}
           >
-            Live chat
+            Live chat <UnreadBadge count={counts?.website} />
           </Link>
         </Button>
       </nav>
@@ -159,7 +166,7 @@ function Dashboard() {
           aria-label="Live chat"
         >
           <h2 className="mb-3 text-2xl font-semibold">Live chat</h2>
-          <SupportChat />
+          <SupportChat onRead={refreshUnread} />
         </section>
       ) : (
         <>
@@ -192,12 +199,13 @@ function Dashboard() {
           </div>
           {selected ? (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <CustomerOrderList orders={orders} selected={selected.code} />
+              <CustomerOrderList orders={orders} selected={selected.code} unreadByOrder={counts?.orders} />
               <OrderPanel
                 key={selected.code}
                 order={selected}
                 checkout={checkout}
                 allowApproval={!user.isAdmin}
+                onRead={refreshUnread}
               />
             </div>
           ) : (
@@ -214,9 +222,11 @@ function Dashboard() {
 function CustomerOrderList({
   orders,
   selected,
+  unreadByOrder,
 }: {
   orders: OrderView[]
   selected: string
+  unreadByOrder?: Record<string, number>
 }) {
   const groups = Object.entries(orderGroupLabels)
     .map(([key, label]) => ({
@@ -242,8 +252,9 @@ function CustomerOrderList({
               search={{ order: item.code }}
               aria-current={item.code === selected ? 'true' : undefined}
             >
-              <span className="block font-semibold">
-                {item.code} · {statusMeta[item.status]?.label ?? item.status}
+              <span className="flex flex-wrap items-center gap-2 font-semibold">
+                <span>{item.code} · {statusMeta[item.status]?.label ?? item.status}</span>
+                <UnreadBadge count={unreadByOrder?.[item.code]} />
               </span>
               <span className="block break-words">{item.title}</span>
             </Link>

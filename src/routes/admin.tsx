@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   createFileRoute,
   Link,
@@ -8,6 +8,7 @@ import {
 import { MessageSquare, Package, Shield, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
+import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
 import { ChatThread } from '@/components/chat-thread'
 import { OrderPanel } from '@/components/order-panel'
 import { PortalShell } from '@/components/portal-shell'
@@ -17,7 +18,9 @@ import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
 import { StaffOrderEmail } from '@/components/staff-order-email'
 import {
+  getStaffInboxCounts,
   listSupportChats,
+  markSupportChatRead,
   readSupportChat,
   sendSupportChat,
 } from '@/lib/chat.functions'
@@ -25,6 +28,7 @@ import { getServerUser } from '@/lib/identity.functions'
 import { statusMeta, type AdminOrderView } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
 import { supportNameRequired } from '@/lib/support-name'
+import { useInboxData } from '@/lib/use-inbox-data'
 import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
@@ -80,10 +84,15 @@ function Admin() {
   const { tab = 'chat', customer, chat } = Route.useSearch()
   const orders = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
+  const { data: counts, refresh: refreshUnread } = useInboxData(getStaffInboxCounts)
+  const online = new Set(counts?.onlineCustomers)
   return (
     <PortalShell>
       <header className="mb-5">
-        <h1 className="text-4xl font-semibold">Staff portal</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-4xl font-semibold">Staff portal</h1>
+          <UnreadBadge count={(counts?.website ?? 0) + (counts?.ordersTotal ?? 0)} />
+        </div>
         {supportName && (
           <p className="mt-2 text-sm text-muted-foreground">
             Replying as {supportName} Support
@@ -108,14 +117,27 @@ function Admin() {
                 aria-current={tab === key ? 'page' : undefined}
               >
                 <Icon /> {label}
+                {key === 'chat' && <UnreadBadge count={counts?.website} />}
+                {key === 'orders' && <UnreadBadge count={counts?.ordersTotal} />}
               </Link>
             </Button>
           ))}
       </nav>
-      {tab === 'chat' && <SupportInbox key={chat ?? 'inbox'} focus={chat} />}
-      {tab === 'customers' && <StaffCustomers selected={customer} />}
+      {tab === 'chat' && (
+        <SupportInbox key={chat ?? 'inbox'} focus={chat} online={online} onRead={refreshUnread} />
+      )}
+      {tab === 'customers' && (
+        <StaffCustomers selected={customer} unreadByCustomer={counts?.customers} online={online} />
+      )}
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
-      {tab === 'orders' && <StaffOrders orders={orders} customer={customer} />}
+      {tab === 'orders' && (
+        <StaffOrders
+          orders={orders}
+          customer={customer}
+          unreadByOrder={counts?.orders}
+          onRead={refreshUnread}
+        />
+      )}
     </PortalShell>
   )
 }
@@ -123,9 +145,13 @@ function Admin() {
 function StaffOrders({
   orders,
   customer,
+  unreadByOrder,
+  onRead,
 }: {
   orders: AdminOrderView[]
   customer?: string
+  unreadByOrder?: Record<string, number>
+  onRead: () => void
 }) {
   const { order: selected } = Route.useSearch()
   const { supportName } = Route.useRouteContext()
@@ -208,8 +234,9 @@ function StaffOrders({
                     : 'bg-card',
                 )}
               >
-                <span className="block font-semibold">
-                  {item.code} · {statusMeta[item.status]?.label ?? item.status}
+                <span className="flex flex-wrap items-center gap-2 font-semibold">
+                  <span>{item.code} · {statusMeta[item.status]?.label ?? item.status}</span>
+                  <UnreadBadge count={unreadByOrder?.[item.code]} />
                 </span>
                 <span className="block break-words">{item.title}</span>
                 <span className="block break-all text-xs text-muted-foreground">
@@ -251,6 +278,7 @@ function StaffOrders({
               order={order}
               staff
               replyNotice={supportName ? undefined : supportNameRequired}
+              onRead={onRead}
             />
           </div>
         </div>
@@ -263,39 +291,38 @@ function StaffOrders({
   )
 }
 
-function SupportInbox({ focus }: { focus?: string }) {
+function SupportInbox({
+  focus,
+  online,
+  onRead,
+}: {
+  focus?: string
+  online: ReadonlySet<string>
+  onRead: () => void
+}) {
   const [selected, setSelected] = useState(focus ?? '')
-  const [chats, setChats] = useState<Awaited<
-    ReturnType<typeof listSupportChats>
-  > | null>(null)
-  const [error, setError] = useState(false)
+  const [marking, setMarking] = useState(false)
+  const [markError, setMarkError] = useState(false)
+  const load = useCallback(() => listSupportChats({ data: { focus } }), [focus])
+  const { data: chats, error, refresh } = useInboxData(load, 7000)
+  const chat = chats?.find((item) => item.id === selected)
+  const refreshAfterRead = useCallback(() => {
+    refresh()
+    onRead()
+  }, [refresh, onRead])
 
-  useEffect(() => {
-    let active = true
-    let timer: ReturnType<typeof setTimeout>
-    async function poll() {
-      try {
-        if (!document.hidden) {
-          const rows = await listSupportChats({ data: { focus } })
-          if (active) {
-            setChats(rows)
-            setError(false)
-          }
-        }
-      } catch {
-        if (active) setError(true)
-      } finally {
-        if (active) timer = setTimeout(poll, 7000)
-      }
+  async function markConversation(id: string) {
+    setMarking(true)
+    setMarkError(false)
+    try {
+      await markSupportChatRead({ data: { id } })
+      refreshAfterRead()
+    } catch {
+      setMarkError(true)
+    } finally {
+      setMarking(false)
     }
-    void poll()
-    return () => {
-      active = false
-      clearTimeout(timer)
-    }
-  }, [focus])
-
-  const chat = chats?.find((item) => item.id === selected) ?? chats?.[0]
+  }
   return (
     <section className="space-y-3" aria-label="Website chat inbox">
       {error && (
@@ -304,38 +331,67 @@ function SupportInbox({ focus }: { focus?: string }) {
         </p>
       )}
       {chats === null && !error && <p role="status">Loading conversations…</p>}
+      {markError && (
+        <p role="alert" className="text-sm text-destructive">
+          Couldn’t mark the conversation as read. Try again.
+        </p>
+      )}
       {chats?.length === 0 && (
         <p className="rounded-xl border bg-card p-5">
           No website chats yet. You can also start a chat from Customers.
         </p>
       )}
-      {chat && (
+      {Boolean(chats?.length) && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div className="space-y-2" aria-label="Conversations">
             {chats?.map((item) => (
-              <button
-                type="button"
+              <div
                 key={item.id}
-                aria-pressed={item.id === chat.id}
-                onClick={() => setSelected(item.id)}
                 className={cn(
-                  'block w-full rounded-lg border p-3 text-left text-sm',
-                  item.id === chat.id
+                  'rounded-lg border',
+                  item.id === chat?.id
                     ? 'border-primary bg-secondary'
                     : 'bg-card',
                 )}
               >
-                <span className="block break-words font-semibold">
-                  {item.name || item.email || `Visitor ${item.id.slice(0, 8)}`}
-                  {item.sender === 'visitor' ? ' · Awaiting reply' : ''}
-                </span>
-                <span className="block truncate">
-                  {item.latest ?? 'Start a conversation'}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  aria-pressed={item.id === chat?.id}
+                  onClick={() => setSelected(item.id)}
+                  className="block w-full rounded-lg p-3 text-left text-sm"
+                >
+                  <span className="flex flex-wrap items-center gap-2 font-semibold">
+                    {item.userId && online.has(item.userId) && <OnlineDot />}
+                    <span className="min-w-0 break-words">
+                      {item.name || item.email || `Visitor ${item.id.slice(0, 8)}`}
+                    </span>
+                    <UnreadBadge count={item.unread} />
+                  </span>
+                  <span className="block truncate">
+                    {item.latest ?? 'Start a conversation'}
+                  </span>
+                  {item.sender === 'visitor' && (
+                    <span className="block text-xs text-muted-foreground">
+                      Awaiting reply
+                    </span>
+                  )}
+                </button>
+                {item.unread > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mx-2 mb-2"
+                    disabled={marking}
+                    onClick={() => void markConversation(item.id)}
+                  >
+                    Mark as read
+                  </Button>
+                )}
+              </div>
             ))}
           </div>
-          <div className="min-w-0 rounded-xl border bg-card p-5">
+          {chat ? <div className="min-w-0 rounded-xl border bg-card p-5">
             <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="break-all text-lg font-semibold">
@@ -360,8 +416,13 @@ function SupportInbox({ focus }: { focus?: string }) {
               key={chat.id}
               id={chat.id}
               customer={Boolean(chat.userId)}
+              onRead={refreshAfterRead}
             />
-          </div>
+          </div> : (
+            <p className="self-start rounded-xl border bg-card p-5">
+              Select a conversation to read or reply.
+            </p>
+          )}
         </div>
       )}
     </section>
@@ -371,9 +432,11 @@ function SupportInbox({ focus }: { focus?: string }) {
 function SupportConversation({
   id,
   customer,
+  onRead,
 }: {
   id: string
   customer: boolean
+  onRead: () => void
 }) {
   const { supportName } = Route.useRouteContext()
   const load = useCallback(() => readSupportChat({ data: { id } }), [id])
@@ -381,10 +444,16 @@ function SupportConversation({
     (body: string) => sendSupportChat({ data: { id, body } }),
     [id],
   )
+  const markRead = useCallback(
+    (through: number) => markSupportChatRead({ data: { id, through } }),
+    [id],
+  )
   return (
     <ChatThread
       load={load}
       send={send}
+      markRead={markRead}
+      onRead={onRead}
       ownSender="agent"
       ownLabel="Support"
       otherLabel={customer ? 'Customer' : 'Visitor'}

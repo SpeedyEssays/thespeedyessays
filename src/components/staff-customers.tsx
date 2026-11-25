@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
 import { StaffCustomerPresence } from '@/components/staff-customer-presence'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +16,15 @@ import {
 type Customers = Awaited<ReturnType<typeof listStaffCustomers>>
 type Customer = Awaited<ReturnType<typeof getStaffCustomer>>
 
-export function StaffCustomers({ selected }: { selected?: string }) {
+export function StaffCustomers({
+  selected,
+  unreadByCustomer,
+  online,
+}: {
+  selected?: string
+  unreadByCustomer?: Record<string, number>
+  online: ReadonlySet<string>
+}) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [customers, setCustomers] = useState<Customers | null>(null)
@@ -88,8 +97,12 @@ export function StaffCustomers({ selected }: { selected?: string }) {
             aria-current={selected === customer.id ? 'true' : undefined}
             className={`block rounded-lg border p-3 text-sm ${selected === customer.id ? 'border-primary bg-secondary' : 'bg-card'}`}
           >
-            <span className="block break-words font-semibold">
-              {customer.displayName || customer.accountName || customer.email}
+            <span className="flex flex-wrap items-center gap-2 font-semibold">
+              {online.has(customer.id) && <OnlineDot />}
+              <span className="min-w-0 break-words">
+                {customer.displayName || customer.accountName || customer.email}
+              </span>
+              <UnreadBadge count={unreadByCustomer?.[customer.id]} />
             </span>
             {(customer.displayName || customer.accountName) && (
               <span className="block break-all text-xs text-muted-foreground">
@@ -103,6 +116,7 @@ export function StaffCustomers({ selected }: { selected?: string }) {
         <CustomerDetails
           key={selected}
           id={selected}
+          unread={unreadByCustomer?.[selected]}
           onSaved={(profile) =>
             setCustomers(
               (rows) =>
@@ -125,9 +139,11 @@ export function StaffCustomers({ selected }: { selected?: string }) {
 
 function CustomerDetails({
   id,
+  unread,
   onSaved,
 }: {
   id: string
+  unread?: number
   onSaved: (profile: Customer) => void
 }) {
   const navigate = useNavigate()
@@ -199,9 +215,12 @@ function CustomerDetails({
       {!customer && !problem && <p role="status">Loading customer account…</p>}
       {customer && (
         <>
-          <h2 className="break-words text-2xl font-semibold">
-            {customer.displayName || customer.accountName || 'Customer account'}
-          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="break-words text-2xl font-semibold">
+              {customer.displayName || customer.accountName || 'Customer account'}
+            </h2>
+            <UnreadBadge count={unread} />
+          </div>
           <p className="mt-1 break-all text-sm text-muted-foreground">
             {customer.email}
           </p>

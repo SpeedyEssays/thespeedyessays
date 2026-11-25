@@ -2,6 +2,8 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import { customerPresence } from "../../db/schema";
 
+export const activeCustomer = sql<boolean>`${customerPresence.lastSeenAt} >= now() - interval '90 seconds'`;
+
 export async function touchCustomerPresence(userId: string) {
   await getDb()
     .insert(customerPresence)
@@ -18,7 +20,7 @@ export async function readCustomerPresence(userId: string) {
   const [presence] = await getDb()
     .select({
       lastSeenAt: customerPresence.lastSeenAt,
-      online: sql<boolean>`${customerPresence.lastSeenAt} >= now() - interval '90 seconds'`,
+      online: activeCustomer,
     })
     .from(customerPresence)
     .where(eq(customerPresence.userId, userId))

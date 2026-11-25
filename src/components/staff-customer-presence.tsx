@@ -42,9 +42,10 @@ export function StaffCustomerPresence({ userId }: { userId: string }) {
     <p className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
       <span
         className={
-          presence.online ? "font-semibold text-success" : "font-medium"
+          presence.online ? "inline-flex items-center gap-1.5 font-semibold text-success" : "font-medium"
         }
       >
+        {presence.online && <span aria-hidden="true" className="size-2.5 rounded-full bg-success" />}
         {presence.online ? "Online" : "Offline"}
       </span>
       {!presence.online &&

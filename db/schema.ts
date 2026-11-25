@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   index,
@@ -88,11 +89,17 @@ export const orderMessages = pgTable(
     sender: text().notNull(), // 'client' | 'support'
     supportName: text('support_name'),
     body: text().notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (t) => [index('order_messages_order_id_idx').on(t.orderId)],
+  (t) => [
+    index('order_messages_order_id_idx').on(t.orderId),
+    index('order_messages_unread_idx')
+      .on(t.sender, t.orderId)
+      .where(sql`${t.readAt} is null`),
+  ],
 )
 
 // Site-wide live chat. Visitors are identified by a secret token kept in their
@@ -132,11 +139,17 @@ export const chatMessages = pgTable(
     sender: text().notNull(), // 'visitor' | 'agent'
     supportName: text('support_name'),
     body: text().notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (t) => [index('chat_messages_conversation_id_idx').on(t.conversationId)],
+  (t) => [
+    index('chat_messages_conversation_id_idx').on(t.conversationId),
+    index('chat_messages_unread_idx')
+      .on(t.sender, t.conversationId)
+      .where(sql`${t.readAt} is null`),
+  ],
 )
 
 // Account details maintained by staff for customer support.

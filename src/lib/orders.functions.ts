@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { and, desc, eq, exists, isNotNull, isNull, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, exists, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { getDb } from '../../db'
@@ -280,7 +280,39 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
       supportName: m.supportName,
       body: m.body,
       at: m.createdAt.toISOString(),
+      readAt: m.readAt?.toISOString() ?? null,
     }))
+  })
+
+export const markOrderMessagesRead = createServerFn({ method: 'POST' })
+  .middleware([requireUser])
+  .validator(
+    z.object({
+      code: z.string().max(20),
+      through: z.number().int().positive().max(2147483647),
+      asSupport: z.boolean(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    if (data.asSupport && !context.user.isAdmin)
+      throw new Error('Admin access required.')
+    const order = await findAccessibleOrder(data.code, {
+      id: context.user.id,
+      isAdmin: data.asSupport,
+    })
+    if (!order) throw new Error('Order not found.')
+    await getDb()
+      .update(orderMessages)
+      .set({ readAt: sql`now()` })
+      .where(
+        and(
+          eq(orderMessages.orderId, order.id),
+          eq(orderMessages.sender, data.asSupport ? 'client' : 'support'),
+          lte(orderMessages.id, data.through),
+          isNull(orderMessages.readAt),
+        ),
+      )
+    return { ok: true }
   })
 
 export const sendOrderMessage = createServerFn({ method: 'POST' })

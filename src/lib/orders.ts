@@ -142,6 +142,7 @@ export type OrderMessageView = {
   supportName: string | null
   body: string
   at: string
+  readAt: string | null
 }
 
 const allowedUploadExtensions = [

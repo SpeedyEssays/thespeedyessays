@@ -1,22 +1,29 @@
 import { randomUUID } from 'node:crypto'
 import { createServerFn } from '@tanstack/react-start'
 import { getCookie, setCookie } from '@tanstack/react-start/server'
-import { and, asc, desc, eq, gte, isNull, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, exists, gte, isNull, lte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
 import {
   chatConversations,
   chatMessages,
+  customerPresence,
   customerProfiles,
+  orderMessages,
+  orders,
 } from '../../db/schema'
-import { touchCustomerPresence } from './customer-presence.server'
+import { activeCustomer, touchCustomerPresence } from './customer-presence.server'
 import { findCustomerAccount } from './customers.server'
-import { requireAdmin } from './identity.functions'
+import { requireAdmin, requireUser } from './identity.functions'
+import { orderCode } from './orders'
 import { readSessionUser, supportChatCookie } from './session.server'
 import { supportNameRequired } from './support-name'
 
 const messageInput = z.object({ body: z.string().trim().min(1).max(3000) })
 const staffThread = z.object({ id: z.uuid() })
+const readThrough = z.object({
+  through: z.number().int().positive().max(2147483647),
+})
 
 type ChatDb = Pick<
   ReturnType<typeof getDb>,
@@ -32,6 +39,7 @@ async function messagesFor(conversationId: string, guestOnly = false) {
       supportName: chatMessages.supportName,
       body: chatMessages.body,
       at: chatMessages.createdAt,
+      readAt: chatMessages.readAt,
     })
     .from(chatMessages)
     .innerJoin(chatConversations, eq(chatMessages.conversationId, chatConversations.id))
@@ -39,7 +47,11 @@ async function messagesFor(conversationId: string, guestOnly = false) {
     .orderBy(desc(chatMessages.id))
     .limit(200)
     .then((rows) =>
-      rows.reverse().map((row) => ({ ...row, at: row.at.toISOString() })),
+      rows.reverse().map((row) => ({
+        ...row,
+        at: row.at.toISOString(),
+        readAt: row.readAt?.toISOString() ?? null,
+      })),
     )
 }
 
@@ -56,6 +68,25 @@ async function accountConversation(db: ChatDb, userId: string) {
     .orderBy(desc(chatConversations.lastMessageAt), asc(chatConversations.id))
     .limit(1)
   return conversation
+}
+
+async function visitorConversation(userId?: string) {
+  if (userId) {
+    const account = await accountConversation(getDb(), userId)
+    if (account) return { id: account.id, guestOnly: false }
+  }
+  const token = visitorToken()
+  if (!token) return null
+  const [guest] = await getDb()
+    .select({ id: chatConversations.id })
+    .from(chatConversations)
+    .where(
+      and(
+        eq(chatConversations.visitorToken, token),
+        isNull(chatConversations.userId),
+      ),
+    )
+  return guest ? { id: guest.id, guestOnly: true } : null
 }
 
 async function openAccountConversation(
@@ -115,25 +146,48 @@ async function openGuestConversation(db: ChatDb, token: string) {
 export const readVisitorChat = createServerFn({ method: 'GET' }).handler(
   async () => {
     const user = await readSessionUser()
-    const token = visitorToken()
-    if (user) {
-      if (!user.isAdmin) await touchCustomerPresence(user.id).catch(() => {})
-      const conversation = await accountConversation(getDb(), user.id)
-      if (conversation) return messagesFor(conversation.id)
-    }
-    if (!token) return []
-    const [guest] = await getDb()
-      .select({ id: chatConversations.id })
-      .from(chatConversations)
-      .where(
-        and(
-          eq(chatConversations.visitorToken, token),
-          isNull(chatConversations.userId),
-        ),
-      )
-    return guest ? messagesFor(guest.id, true) : []
+    if (user && !user.isAdmin) await touchCustomerPresence(user.id).catch(() => {})
+    const conversation = await visitorConversation(user?.id)
+    return conversation ? messagesFor(conversation.id, conversation.guestOnly) : []
   },
 )
+
+async function markChatRead(
+  conversationId: string,
+  sender: 'agent' | 'visitor',
+  through?: number,
+  guestOnly = false,
+) {
+  const db = getDb()
+  await db
+    .update(chatMessages)
+    .set({ readAt: sql`now()` })
+    .where(
+      and(
+        eq(chatMessages.conversationId, conversationId),
+        eq(chatMessages.sender, sender),
+        through !== undefined ? lte(chatMessages.id, through) : undefined,
+        isNull(chatMessages.readAt),
+        guestOnly
+          ? exists(
+              db.select({ id: chatConversations.id })
+                .from(chatConversations)
+                .where(and(eq(chatConversations.id, conversationId), isNull(chatConversations.userId))),
+            )
+          : undefined,
+      ),
+    )
+  return { ok: true }
+}
+
+export const markVisitorChatRead = createServerFn({ method: 'POST' })
+  .validator(readThrough)
+  .handler(async ({ data }) => {
+    const user = await readSessionUser()
+    const conversation = await visitorConversation(user?.id)
+    if (!conversation) return { ok: true }
+    return markChatRead(conversation.id, 'agent', data.through, conversation.guestOnly)
+  })
 
 export const sendVisitorChat = createServerFn({ method: 'POST' })
   .validator(messageInput)
@@ -222,6 +276,11 @@ export const listSupportChats = createServerFn({ method: 'GET' })
           select cm.sender from ${chatMessages} cm where cm.conversation_id = ${chatConversations}."id"
           order by cm.id desc limit 1
         )`,
+        unread: sql<number>`(
+          select count(*)::int from ${chatMessages} cm
+          where cm.conversation_id = ${chatConversations}."id"
+            and cm.sender = 'visitor' and cm.read_at is null
+        )`,
       })
       .from(chatConversations)
       .leftJoin(
@@ -243,6 +302,78 @@ export const readSupportChat = createServerFn({ method: 'GET' })
   .middleware([requireAdmin])
   .validator(staffThread)
   .handler(({ data }) => messagesFor(data.id))
+
+export const markSupportChatRead = createServerFn({ method: 'POST' })
+  .middleware([requireAdmin])
+  .validator(staffThread.extend(readThrough.partial().shape))
+  .handler(({ data }) => markChatRead(data.id, 'visitor', data.through))
+
+function unreadOrders(customerId?: string) {
+  return getDb()
+    .select({ orderId: orders.id, customerId: orders.userId, unread: count() })
+    .from(orderMessages)
+    .innerJoin(orders, eq(orders.id, orderMessages.orderId))
+    .where(and(
+      isNull(orderMessages.readAt),
+      eq(orderMessages.sender, customerId ? 'support' : 'client'),
+      customerId ? eq(orders.userId, customerId) : undefined,
+    ))
+    .groupBy(orders.id, orders.userId)
+}
+
+function inboxCounts(website: number, orders: { orderId: number; unread: number }[]) {
+  return {
+    website,
+    orders: Object.fromEntries(orders.map((row) => [orderCode(row.orderId), row.unread])),
+    ordersTotal: orders.reduce((total, row) => total + row.unread, 0),
+  }
+}
+
+export const getCustomerInboxCounts = createServerFn({ method: 'GET' })
+  .middleware([requireUser])
+  .handler(async ({ context }) => {
+    const conversation = await visitorConversation(context.user.id)
+    const [website, orders] = await Promise.all([
+      conversation
+        ? getDb()
+            .select({ unread: count() })
+            .from(chatMessages)
+            .innerJoin(chatConversations, eq(chatConversations.id, chatMessages.conversationId))
+            .where(and(
+              eq(chatMessages.conversationId, conversation.id),
+              eq(chatMessages.sender, 'agent'),
+              isNull(chatMessages.readAt),
+              conversation.guestOnly ? isNull(chatConversations.userId) : undefined,
+            ))
+        : [],
+      unreadOrders(context.user.id),
+    ])
+    return inboxCounts(website[0]?.unread ?? 0, orders)
+  })
+
+export const getStaffInboxCounts = createServerFn({ method: 'GET' })
+  .middleware([requireAdmin])
+  .handler(async () => {
+    const db = getDb()
+    const [website, orders, active] = await Promise.all([
+      db.select({ customerId: chatConversations.userId, unread: count() })
+        .from(chatMessages)
+        .innerJoin(chatConversations, eq(chatConversations.id, chatMessages.conversationId))
+        .where(and(eq(chatMessages.sender, 'visitor'), isNull(chatMessages.readAt)))
+        .groupBy(chatConversations.userId),
+      unreadOrders(),
+      db.select({ id: customerPresence.userId }).from(customerPresence).where(activeCustomer),
+    ])
+    const customers = new Map<string, number>()
+    for (const { customerId, unread } of [...website, ...orders]) {
+      if (customerId) customers.set(customerId, (customers.get(customerId) ?? 0) + unread)
+    }
+    return {
+      ...inboxCounts(website.reduce((total, row) => total + row.unread, 0), orders),
+      customers: Object.fromEntries(customers),
+      onlineCustomers: active.map(({ id }) => id),
+    }
+  })
 
 export const sendSupportChat = createServerFn({ method: 'POST' })
   .middleware([requireAdmin])

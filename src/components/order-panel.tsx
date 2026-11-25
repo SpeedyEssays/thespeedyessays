@@ -8,6 +8,7 @@ import { uploadOrderFile } from '@/lib/files.functions'
 import {
   approveOrder,
   getOrderMessages,
+  markOrderMessagesRead,
   requestRevision,
   sendOrderMessage,
   updateOrderStatus,
@@ -36,12 +37,14 @@ export function OrderPanel({
   checkout = false,
   allowApproval = false,
   replyNotice,
+  onRead,
 }: {
   order: OrderView
   staff?: boolean
   checkout?: boolean
   allowApproval?: boolean
   replyNotice?: string
+  onRead?: () => void
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -60,6 +63,11 @@ export function OrderPanel({
   const send = useCallback(
     (body: string) =>
       sendOrderMessage({ data: { code: order.code, body, asSupport: staff } }),
+    [order.code, staff],
+  )
+  const markRead = useCallback(
+    (through: number) =>
+      markOrderMessagesRead({ data: { code: order.code, through, asSupport: staff } }),
     [order.code, staff],
   )
 
@@ -429,6 +437,8 @@ export function OrderPanel({
         <ChatThread
           load={load}
           send={send}
+          markRead={markRead}
+          onRead={onRead}
           ownSender={staff ? 'support' : 'client'}
           ownLabel={staff ? 'Support' : 'You'}
           otherLabel={staff ? 'Customer' : 'Support'}
