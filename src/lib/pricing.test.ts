@@ -3,9 +3,12 @@ import {
   assignmentTypes,
   estimatePrice,
   formatOrderLength,
+  lengthForAssignment,
   MAX_ORDER_PAGES,
+  MAX_ORDER_SLIDES,
   MAX_ORDER_WORDS,
   parseOrderLength,
+  PRESENTATION_TYPE,
   quoteLength,
 } from "./pricing";
 
@@ -58,6 +61,41 @@ describe("order estimates", () => {
     expect(parseOrderLength("1.5", "pages")).toBeUndefined();
     expect(parseOrderLength(MAX_ORDER_PAGES + 1, "pages")).toBeUndefined();
     expect(formatOrderLength(1, 100)).toBe("100 words (1 billable page)");
+  });
+
+  it("prices a large presentation by slide and keeps its unit on the order", () => {
+    const length = lengthForAssignment(PRESENTATION_TYPE, {
+      unit: "pages",
+      amount: "600",
+    });
+    expect(length).toEqual({ unit: "slides", amount: "600" });
+    expect(estimatePrice({ ...base, ...quoteLength(length) })).toMatchObject({
+      slideCount: 600,
+      pages: 0,
+      perSlide: 4.8,
+      total: 2880,
+    });
+    expect(
+      estimatePrice({
+        ...base,
+        deadline: "7d",
+        ...quoteLength(length),
+      }),
+    ).toMatchObject({ perSlide: 5.38, total: 3228 });
+    expect(
+      estimatePrice({
+        ...base,
+        service: "proofreading",
+        slideCount: 1,
+      }).total,
+    ).toBe(3.12);
+    expect(formatOrderLength(0, null, 600)).toBe("600 slides");
+    expect(parseOrderLength(MAX_ORDER_SLIDES, "slides")).toBe(MAX_ORDER_SLIDES);
+    expect(parseOrderLength(MAX_ORDER_SLIDES + 1, "slides")).toBeUndefined();
+    expect(lengthForAssignment("Essay", length)).toEqual({
+      unit: "pages",
+      amount: "600",
+    });
   });
 
   it("includes the new formats and retains legacy assignment values", () => {

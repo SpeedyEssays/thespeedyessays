@@ -35,6 +35,7 @@ export const orders = pgTable(
     sources: integer().notNull().default(0),
     pages: integer().notNull(),
     wordCount: integer('word_count'),
+    slideCount: integer('slide_count'),
     deadlineOption: text('deadline_option').notNull(),
     dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
     agreedDueAt: timestamp('agreed_due_at', { withTimezone: true }),

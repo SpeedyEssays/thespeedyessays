@@ -5,7 +5,8 @@ import { ArrowRight, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
 import {
-  academicLevels, deadlines, estimatePrice, formatUSD, maxOrderLength, parseOrderLength, quoteLength,
+  academicLevels, deadlines, estimatePrice, formatUSD, lengthForAssignment, maxOrderLength,
+  parseOrderLength, PRESENTATION_TYPE, quoteLength,
   type AcademicLevelId, type AssignmentType, type DeadlineId, type OrderLength, type OrderService,
 } from '@/lib/pricing'
 import { cn } from '@/lib/utils'
@@ -22,6 +23,7 @@ export function PricingCalculator({ className }: { className?: string }) {
   const input = { level, service, ...quoteLength(length) }
   const quote = estimatePrice({ ...input, deadline })
   const relaxed = estimatePrice({ ...input, deadline: '14d' })
+  const isSlideQuote = length.unit === 'slides'
 
   return (
     <div className={cn('rounded-2xl border bg-card p-6 shadow-xl shadow-primary/5 sm:p-8', className)}>
@@ -33,7 +35,10 @@ export function PricingCalculator({ className }: { className?: string }) {
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2">
           <OrderServiceField id="calc-service" value={service} onChange={setService} />
-          <PaperTypeField id="calc-type" value={type} onChange={setType} />
+          <PaperTypeField id="calc-type" value={type} onChange={(value) => {
+            setType(value)
+            setLength((previous) => lengthForAssignment(value, previous))
+          }} />
         </div>
         <fieldset>
           <legend className="mb-2 text-sm font-medium">Academic level</legend>
@@ -83,6 +88,7 @@ export function PricingCalculator({ className }: { className?: string }) {
           length={length}
           onChange={setLength}
           quote={quote}
+          allowSlides={type === PRESENTATION_TYPE}
           error={validLength ? undefined : `Enter 1 to ${maxOrderLength(length.unit).toLocaleString('en-US')} ${length.unit}.`}
         />
       </div>
@@ -94,7 +100,7 @@ export function PricingCalculator({ className }: { className?: string }) {
             {validLength ? formatUSD(quote.total) : '—'}
           </p>
           <p className="text-xs text-muted-foreground">
-            {formatUSD(quote.perPage)} per page
+            {formatUSD(isSlideQuote ? quote.perSlide : quote.perPage)} per {isSlideQuote ? 'slide' : 'page'}
             {validLength && quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
           </p>
         </div>
@@ -107,6 +113,7 @@ export function PricingCalculator({ className }: { className?: string }) {
               service,
               pages: length.unit === 'pages' ? quote.pages : undefined,
               words: input.wordCount,
+              slides: input.slideCount,
             }}>
               Continue to order <ArrowRight />
             </Link>

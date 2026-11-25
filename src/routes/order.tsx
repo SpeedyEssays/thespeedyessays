@@ -27,10 +27,12 @@ import {
   formatUSD,
   formatOrderLength,
   formattingStyles,
+  lengthForAssignment,
   maxOrderLength,
   orderServiceIds,
   orderServices,
   parseOrderLength,
+  PRESENTATION_TYPE,
   quoteLength,
   type AcademicLevelId,
   type AssignmentType,
@@ -49,6 +51,7 @@ type OrderSearch = {
   service?: OrderService
   pages?: number
   words?: number
+  slides?: number
 }
 
 export const Route = createFileRoute('/order')({
@@ -59,6 +62,9 @@ export const Route = createFileRoute('/order')({
     service: orderServiceIds.find((service) => service === search.service),
     pages: parseOrderLength(search.pages, 'pages'),
     words: parseOrderLength(search.words, 'words'),
+    slides: search.type === PRESENTATION_TYPE
+      ? parseOrderLength(search.slides, 'slides')
+      : undefined,
   }),
   beforeLoad: async ({ location }) => {
     const user = await getServerUser()
@@ -109,9 +115,13 @@ function OrderPage() {
     level: search.level ?? 'undergraduate',
     style: 'APA 7',
     sources: '5',
-    length: search.words !== undefined
-      ? { unit: 'words', amount: String(search.words) }
-      : { unit: 'pages', amount: String(search.pages ?? 3) },
+    length: search.slides !== undefined
+      ? { unit: 'slides', amount: String(search.slides) }
+      : search.words !== undefined
+        ? { unit: 'words', amount: String(search.words) }
+        : search.pages !== undefined
+          ? { unit: 'pages', amount: String(search.pages) }
+          : lengthForAssignment(search.type ?? 'Essay', { unit: 'pages', amount: '3' }),
     deadline: search.deadline ?? '7d',
     extras: {},
     instructions: '',
@@ -120,11 +130,21 @@ function OrderPage() {
   })
   const length = quoteLength(form.length)
   const quote = estimatePrice({ ...form, ...length })
+  const unitPrice = quote.slideCount === undefined ? quote.perPage : quote.perSlide
   const validLength = parseOrderLength(form.length.amount, form.length.unit) !== undefined
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
     setErrors((e) => ({ ...e, [key]: '' }))
+  }
+
+  function selectAssignment(type: AssignmentType) {
+    setForm((previous) => ({
+      ...previous,
+      type,
+      length: lengthForAssignment(type, previous.length),
+    }))
+    setErrors((previous) => ({ ...previous, length: '' }))
   }
 
   function validate(s: number) {
@@ -172,6 +192,7 @@ function OrderPage() {
         subject: form.subject,
         pages: quote.pages,
         wordCount: length.wordCount,
+        slideCount: length.slideCount,
         level: form.level,
         deadline: form.deadline,
         sources: Number(form.sources),
@@ -274,7 +295,7 @@ function OrderPage() {
           {step === 0 && (
             <div className="grid gap-5 sm:grid-cols-2">
               <OrderServiceField id="service" value={form.service} onChange={(service) => set('service', service)} />
-              <PaperTypeField id="type" value={form.type} onChange={(type) => set('type', type)} />
+              <PaperTypeField id="type" value={form.type} onChange={selectAssignment} />
               <Field label="Subject" id="subject" error={errors.subject}>
                 <Select value={form.subject} onValueChange={(v) => set('subject', v)}>
                   <SelectTrigger id="subject" className="w-full" aria-invalid={!!errors.subject}>
@@ -343,6 +364,7 @@ function OrderPage() {
                 length={form.length}
                 onChange={(value) => set('length', value)}
                 quote={quote}
+                allowSlides={form.type === PRESENTATION_TYPE}
                 error={errors.length}
               />
               <fieldset>
@@ -471,7 +493,7 @@ function OrderPage() {
                 <Summary label="Topic" value={form.topic} />
                 <Summary label="Level" value={academicLevels.find((l) => l.id === form.level)?.label} />
                 <Summary label="Style" value={`${form.style} · ${form.sources} sources`} />
-                <Summary label="Length" value={formatOrderLength(quote.pages, length.wordCount)} />
+                <Summary label="Length" value={formatOrderLength(quote.pages, length.wordCount, quote.slideCount)} />
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
                 <Summary label="Attachments" value={form.files.length ? `${form.files.length} file(s)` : 'None'} />
               </dl>
@@ -517,7 +539,12 @@ function OrderPage() {
             <h2 className="text-lg font-semibold">Order summary</h2>
             <dl className="mt-4 space-y-2 text-sm">
               <Row label="Service" value={orderServices[form.service].label} />
-              {validLength && <Row label={`${quote.pages.toLocaleString('en-US')} page${quote.pages > 1 ? 's' : ''} × ${formatUSD(quote.perPage)}`} value={formatUSD(quote.base)} />}
+              {validLength && (
+                <Row
+                  label={`${formatOrderLength(quote.pages, null, quote.slideCount)} × ${formatUSD(unitPrice)}`}
+                  value={formatUSD(quote.base)}
+                />
+              )}
               {quote.extras > 0 && <Row label="Extras" value={formatUSD(quote.extras)} />}
               <Row label="Originality report" value="Free" />
               <Row label="Title page & bibliography" value="Free" />

@@ -4,18 +4,22 @@ import { Label } from "@/components/ui/label";
 import {
   assignmentTypeGroups,
   assignmentTypeLabel,
+  changeLengthUnit,
   formatOrderLength,
+  formatUSD,
   maxOrderLength,
   orderServiceIds,
   orderServices,
   WORDS_PER_PAGE,
   type AssignmentType,
+  type LengthUnit,
   type OrderLength,
   type OrderService,
 } from "@/lib/pricing";
 
 const selectClass =
   "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
+const unitLabels = { pages: "Pages", words: "Words", slides: "Slides" };
 
 export function PaperTypeField({
   id,
@@ -83,14 +87,23 @@ export function OrderLengthField({
   onChange,
   quote,
   error,
+  allowSlides = false,
 }: {
   id: string;
   length: OrderLength;
   onChange: (length: OrderLength) => void;
-  quote: { pages: number; words: number };
+  quote: { pages: number; words: number; perSlide: number };
   error?: string;
+  allowSlides?: boolean;
 }) {
-  const isPages = length.unit === "pages";
+  const units: LengthUnit[] = allowSlides
+    ? ["pages", "words", "slides"]
+    : ["pages", "words"];
+  const description = {
+    pages: `About ${quote.words.toLocaleString("en-US")} words at ${WORDS_PER_PAGE} words per double-spaced page.`,
+    words: `${formatOrderLength(quote.pages, quote.words)}. ${WORDS_PER_PAGE} words per billable page, rounded up.`,
+    slides: `${formatUSD(quote.perSlide)} per slide · up to ${maxOrderLength("slides").toLocaleString("en-US")} slides`,
+  };
   return (
     <fieldset className="space-y-2">
       <legend className="mb-2 text-sm font-medium">Length</legend>
@@ -99,7 +112,7 @@ export function OrderLengthField({
         aria-label="Length unit"
         className="flex flex-wrap gap-2"
       >
-        {(["pages", "words"] as const).map((unit) => (
+        {units.map((unit) => (
           <Button
             key={unit}
             type="button"
@@ -108,19 +121,14 @@ export function OrderLengthField({
             aria-pressed={length.unit === unit}
             onClick={() => {
               if (length.unit !== unit)
-                onChange({
-                  unit,
-                  amount: String(unit === "pages" ? quote.pages : quote.words),
-                });
+                onChange(changeLengthUnit(length, unit));
             }}
           >
-            {unit === "pages" ? "Pages" : "Words"}
+            {unitLabels[unit]}
           </Button>
         ))}
       </div>
-      <Label htmlFor={id}>
-        {isPages ? "Number of pages" : "Number of words"}
-      </Label>
+      <Label htmlFor={id}>Number of {length.unit}</Label>
       <Input
         id={id}
         type="number"
@@ -140,10 +148,7 @@ export function OrderLengthField({
         id={`${id}-hint`}
         className={`text-xs ${error ? "text-destructive" : "text-muted-foreground"}`}
       >
-        {error ||
-          (isPages
-            ? `About ${quote.words.toLocaleString("en-US")} words at ${WORDS_PER_PAGE} words per double-spaced page.`
-            : `${formatOrderLength(quote.pages, quote.words)}. ${WORDS_PER_PAGE} words per billable page, rounded up.`)}
+        {error || description[length.unit]}
       </p>
     </fieldset>
   );

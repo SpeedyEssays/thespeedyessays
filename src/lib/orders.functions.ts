@@ -24,8 +24,10 @@ import {
   estimatePrice,
   formattingStyles,
   MAX_ORDER_PAGES,
+  MAX_ORDER_SLIDES,
   MAX_ORDER_WORDS,
   orderServiceIds,
+  PRESENTATION_TYPE,
 } from './pricing'
 import { supportNameRequired } from './support-name'
 
@@ -40,8 +42,9 @@ const createOrderInput = z.object({
   level: z.enum(levelIds),
   style: z.enum(formattingStyles),
   sources: z.coerce.number().int().min(0).max(100),
-  pages: z.number().int().min(1).max(MAX_ORDER_PAGES),
+  pages: z.number().int().min(0).max(MAX_ORDER_PAGES),
   wordCount: z.number().int().min(1).max(MAX_ORDER_WORDS).optional(),
+  slideCount: z.number().int().min(1).max(MAX_ORDER_SLIDES).optional(),
   deadline: z.enum(deadlineIds),
   extras: z.object({
     topWriter: z.boolean().optional(),
@@ -52,7 +55,12 @@ const createOrderInput = z.object({
   submissionId: z.uuid(),
   agree: z.literal(true),
   hasFiles: z.boolean(),
-})
+}).refine(
+  ({ slideCount, type, pages, wordCount }) => slideCount === undefined
+    ? pages >= 1
+    : type === PRESENTATION_TYPE && pages === 0 && wordCount === undefined,
+  { message: 'Choose a valid page, word or slide count for this assignment.' },
+)
 
 export const createOrder = createServerFn({ method: 'POST' })
   .middleware([requireUser])
@@ -71,6 +79,7 @@ export const createOrder = createServerFn({ method: 'POST' })
       deadline: deadline.id,
       pages: data.pages,
       wordCount: data.wordCount,
+      slideCount: data.slideCount,
       service: data.service,
       extras: data.extras,
     })
@@ -92,6 +101,7 @@ export const createOrder = createServerFn({ method: 'POST' })
         sources: data.sources,
         pages: quote.pages,
         wordCount: data.wordCount,
+        slideCount: quote.slideCount,
         deadlineOption: deadline.id,
         dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
         extras: data.extras,

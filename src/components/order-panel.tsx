@@ -235,7 +235,7 @@ export function OrderPanel({
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {assignmentTypeLabel(order.type)} · {order.subject} · {order.level} · {order.style} ·{' '}
-          {formatOrderLength(order.pages, order.wordCount)}
+          {formatOrderLength(order.pages, order.wordCount, order.slideCount)}
         </p>
         {order.service !== 'writing' && (
           <p className="mt-1 text-sm">{orderServices[order.service].label}</p>

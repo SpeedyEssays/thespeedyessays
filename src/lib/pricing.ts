@@ -17,6 +17,8 @@ export const deadlines = [
   { id: '8h', label: '8 hours', hours: 8, multiplier: 2.6 },
 ] as const
 
+export const PRESENTATION_TYPE = 'Presentation / Slides'
+
 export const assignmentTypeGroups = [
   {
     label: 'Essays and coursework',
@@ -67,7 +69,7 @@ export const assignmentTypeGroups = [
   },
   {
     label: 'Creative work and presentations',
-    types: ['Creative Writing', 'Presentation / Slides', 'Speech', 'Script'],
+    types: ['Creative Writing', PRESENTATION_TYPE, 'Speech', 'Script'],
   },
   {
     label: 'Problems and quizzes',
@@ -101,12 +103,15 @@ export const formattingStyles = ['APA 7', 'MLA 9', 'Chicago', 'Harvard', 'IEEE',
 export const WORDS_PER_PAGE = 275
 export const MAX_ORDER_PAGES = 10_000
 export const MAX_ORDER_WORDS = MAX_ORDER_PAGES * WORDS_PER_PAGE
+export const MAX_ORDER_SLIDES = 10_000
+const SLIDE_RATE_FACTOR = 0.6
 
-export type LengthUnit = 'pages' | 'words'
+export type LengthUnit = 'pages' | 'words' | 'slides'
 export type OrderLength = { unit: LengthUnit; amount: string }
 
 export function maxOrderLength(unit: LengthUnit) {
-  return unit === 'pages' ? MAX_ORDER_PAGES : MAX_ORDER_WORDS
+  if (unit === 'slides') return MAX_ORDER_SLIDES
+  return unit === 'words' ? MAX_ORDER_WORDS : MAX_ORDER_PAGES
 }
 
 export function parseOrderLength(value: unknown, unit: LengthUnit) {
@@ -119,10 +124,30 @@ export function quoteLength({ unit, amount }: OrderLength) {
   return {
     pages: unit === 'pages' ? (count ?? 1) : 1,
     wordCount: unit === 'words' ? count : undefined,
+    slideCount: unit === 'slides' ? count : undefined,
   }
 }
 
-export function formatOrderLength(pages: number, wordCount?: number | null) {
+export function changeLengthUnit(length: OrderLength, unit: LengthUnit): OrderLength {
+  if (unit === length.unit) return length
+  const count = parseOrderLength(length.amount, length.unit)
+  const wholeUnits = count === undefined ? 1
+    : length.unit === 'words' ? Math.ceil(count / WORDS_PER_PAGE) : count
+  return { unit, amount: String(unit === 'words' ? wholeUnits * WORDS_PER_PAGE : wholeUnits) }
+}
+
+export function lengthForAssignment(type: AssignmentType, length: OrderLength): OrderLength {
+  if (type === PRESENTATION_TYPE) return changeLengthUnit(length, 'slides')
+  return length.unit === 'slides' ? changeLengthUnit(length, 'pages') : length
+}
+
+export function formatOrderLength(
+  pages: number,
+  wordCount?: number | null,
+  slideCount?: number | null,
+) {
+  if (slideCount != null)
+    return `${slideCount.toLocaleString('en-US')} ${slideCount === 1 ? 'slide' : 'slides'}`
   const unit = pages === 1 ? 'page' : 'pages'
   const pageCount = pages.toLocaleString('en-US')
   if (wordCount != null)
@@ -150,18 +175,22 @@ export function estimatePrice(input: {
   deadline: DeadlineId
   pages: number
   wordCount?: number
+  slideCount?: number
   service?: OrderService
   extras?: Extras
 }) {
   const level = academicLevels.find((l) => l.id === input.level) ?? academicLevels[1]
   const deadline = deadlines.find((d) => d.id === input.deadline) ?? deadlines[0]
   const wordCount = parseOrderLength(input.wordCount, 'words')
-  const pages = wordCount === undefined
-    ? (parseOrderLength(input.pages, 'pages') ?? 1)
-    : Math.ceil(wordCount / WORDS_PER_PAGE)
+  const slideCount = parseOrderLength(input.slideCount, 'slides')
+  const pages = slideCount !== undefined ? 0
+    : wordCount === undefined ? (parseOrderLength(input.pages, 'pages') ?? 1)
+      : Math.ceil(wordCount / WORDS_PER_PAGE)
   const service = orderServices[input.service ?? 'writing']
-  const perPage = round(level.rate * deadline.multiplier * service.rate)
-  const base = round(perPage * pages)
+  const rate = level.rate * deadline.multiplier * service.rate
+  const perPage = round(rate)
+  const perSlide = round(rate * SLIDE_RATE_FACTOR)
+  const base = round(slideCount === undefined ? perPage * pages : perSlide * slideCount)
 
   let extras = 0
   if (input.extras?.topWriter) extras += base * extraPrices.topWriter.percent
@@ -171,11 +200,13 @@ export function estimatePrice(input: {
 
   return {
     perPage,
+    perSlide,
     pages,
+    slideCount,
     base,
     extras,
     total: round(base + extras),
-    words: wordCount ?? pages * WORDS_PER_PAGE,
+    words: slideCount === undefined ? (wordCount ?? pages * WORDS_PER_PAGE) : 0,
   }
 }
 

@@ -30,6 +30,7 @@ function toView(row: OrderRow, files: FileRow[], staff = false): OrderView {
     sources: row.sources,
     pages: row.pages,
     wordCount: row.wordCount,
+    slideCount: row.slideCount,
     dueAt: (row.agreedDueAt ?? row.dueAt).toISOString(),
     agreedDueAt: row.agreedDueAt?.toISOString() ?? null,
     placedAt: row.createdAt.toISOString(),

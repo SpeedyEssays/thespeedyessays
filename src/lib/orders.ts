@@ -117,6 +117,7 @@ export type OrderView = {
   sources: number
   pages: number
   wordCount: number | null
+  slideCount: number | null
   dueAt: string
   agreedDueAt: string | null
   placedAt: string
