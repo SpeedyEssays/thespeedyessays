@@ -32,7 +32,7 @@ Use the remaining credentials as runtime secrets.
 | Runtime file storage | `SUPABASE_STORAGE_SECRET_KEY` secret                                                                                                            |
 | Order notifications  | `SPEEDYESSAYS_EMAIL_URL` and `SPEEDYESSAYS_EMAIL_SECRET` if [Gmail sending](./gmail-sender.md) is configured                                    |
 | Website origin       | `SITE_ORIGIN` set to the new public HTTPS origin without a trailing slash                                                                       |
-| Runtime checkout     | `PAYSTACK_SECRET_KEY` starting in test mode, `PAYSTACK_WEBHOOK_SECRET` if separate, and `PAYSTACK_CALLBACK_ORIGIN` set to the Worker origin     |
+| Runtime checkout     | `PAYSTACK_SECRET_KEY` for live mode, `PAYSTACK_TEST_SECRET_KEY` for staff tests, `PAYSTACK_WEBHOOK_SECRET` if separate, and `PAYSTACK_CALLBACK_ORIGIN` set to the Worker origin |
 
 If using Hyperdrive through Workers Builds, add its configuration ID and the binding name `HYPERDRIVE` to the Wrangler configuration for that deployment. Keep queries uncached because staff and customer screens must show newly saved orders and messages.
 
@@ -60,12 +60,14 @@ Use Node.js 24 and pnpm to run the same app on a host such as Render. The build 
 | Public build settings | `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`                                        |
 | Runtime database      | `DATABASE_URL` for the Supabase session pooler with TLS certificate verification               |
 | Runtime file storage  | `SUPABASE_STORAGE_SECRET_KEY`                                                                  |
-| Runtime checkout      | `PAYSTACK_SECRET_KEY`, `PAYSTACK_WEBHOOK_SECRET` (if separate), and `PAYSTACK_CALLBACK_ORIGIN` |
+| Runtime checkout      | `PAYSTACK_SECRET_KEY`, `PAYSTACK_TEST_SECRET_KEY`, `PAYSTACK_WEBHOOK_SECRET` (if separate), and `PAYSTACK_CALLBACK_ORIGIN` |
 | Website origin        | `SITE_ORIGIN` set to the public HTTPS origin. On Render it defaults to `RENDER_EXTERNAL_URL`.  |
 
 The service listens on `0.0.0.0` at the host's `PORT` (3000 locally). On Render, use a Web Service and set `SKIP_INSTALL_DEPS=true` to use the explicit install command above. The free instance is for testing and sleeps after inactivity. The database and order files live in Supabase.
 
-For either host, set the Paystack webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash. Use test keys for verification. Complete the payment provider's business approval before switching to live mode.
+For a sandbox check, save the `sk_test_` secret as `PAYSTACK_TEST_SECRET_KEY` and open **Staff portal → Payment test**. The page verifies the USD test directly with Paystack without recording a payment on a customer order.
+
+For live checkout, complete Paystack business approval and save the `sk_live_` secret as `PAYSTACK_SECRET_KEY`. Set the live webhook to `/api/paystack-webhook` on the deployed site and set `PAYSTACK_CALLBACK_ORIGIN` to its HTTPS origin without a trailing slash.
 
 ### Order notification email
 

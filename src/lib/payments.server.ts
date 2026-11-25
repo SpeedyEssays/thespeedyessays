@@ -11,7 +11,7 @@ export const paymentReferenceSchema = z.string().regex(/^se-[0-9a-f-]{36}$/)
 export function paystackConfig() {
   const key = process.env.PAYSTACK_SECRET_KEY
   const origin = process.env.PAYSTACK_CALLBACK_ORIGIN
-  if (!key || !origin || !URL.canParse(origin)) return null
+  if (!key?.startsWith('sk_live_') || !origin || !URL.canParse(origin)) return null
   const url = new URL(origin)
   if (url.protocol !== 'https:' || url.origin !== origin) {
     return null
@@ -33,6 +33,23 @@ export async function paystackRequest(path: string, key: string, body?: object) 
     throw new Error('The payment provider could not complete this request. Try again or contact support.')
   }
   return result.data.data
+}
+
+export async function initializePaystackCheckout(
+  key: string,
+  input: { email: string; amount: number; reference: string; callback_url: string },
+) {
+  const result = z.object({ authorization_url: z.url(), reference: z.literal(input.reference) }).parse(
+    await paystackRequest('/transaction/initialize', key, {
+      ...input,
+      currency,
+      channels: ['card'],
+    }),
+  )
+  if (new URL(result.authorization_url).origin !== 'https://checkout.paystack.com') {
+    throw new Error('The payment provider returned an invalid checkout address.')
+  }
+  return result.authorization_url
 }
 
 export async function reconcilePayment(reference: string, requireSuccess = false) {

@@ -5,7 +5,7 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, MessageSquare, Package, Shield, Star, Users } from 'lucide-react'
+import { Bell, CreditCard, MessageSquare, Package, Shield, Star, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
@@ -20,6 +20,7 @@ import { StaffOrderEmail } from '@/components/staff-order-email'
 import { StaffFeedback } from '@/components/staff-feedback'
 import { StaffNotifications } from '@/components/staff-notifications'
 import { StaffOrderStatus } from '@/components/staff-order-status'
+import { StaffPaymentTest } from '@/components/staff-payment-test'
 import {
   getStaffInboxCounts,
   listSupportChats,
@@ -38,12 +39,13 @@ import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
   tab: z
-    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins'])
+    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins', 'payment-test'])
     .optional()
     .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
   order: z.string().max(20).optional().catch(undefined),
   chat: z.uuid().optional().catch(undefined),
+  testRef: z.string().regex(/^se-test-[0-9a-f-]{36}$/).optional().catch(undefined),
 })
 
 const staffPages = [
@@ -52,6 +54,7 @@ const staffPages = [
   { key: 'customers', label: 'Customers', Icon: Users },
   { key: 'feedback', label: 'Feedback', Icon: Star },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
+  { key: 'payment-test', label: 'Payment test', Icon: CreditCard },
   { key: 'admins', label: 'Admins', Icon: Shield },
 ] as const
 
@@ -88,7 +91,7 @@ export const Route = createFileRoute('/admin')({
 })
 
 function Admin() {
-  const { tab = 'chat', customer, chat, order } = Route.useSearch()
+  const { tab = 'chat', customer, chat, order, testRef } = Route.useSearch()
   const orders = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
   useVisibleActivity(recordStaffActivity, Boolean(supportName))
@@ -139,6 +142,7 @@ function Admin() {
       )}
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
       {tab === 'feedback' && <StaffFeedback />}
+      {tab === 'payment-test' && <StaffPaymentTest key={testRef ?? 'new'} reference={testRef} />}
       {tab === 'notifications' && <StaffNotifications key={`${customer ?? ''}:${order ?? ''}`} customerId={customer} orderCode={order} />}
       {tab === 'orders' && (
         <StaffOrders

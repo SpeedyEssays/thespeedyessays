@@ -8,10 +8,9 @@ import { requireUser } from './identity.functions'
 import { findAccessibleOrder } from './order-records'
 import { canCheckout, orderCode } from './orders'
 import {
-  currency,
+  initializePaystackCheckout,
   paymentReferenceSchema,
   paystackConfig,
-  paystackRequest,
   reconcilePayment,
 } from './payments.server'
 
@@ -58,24 +57,17 @@ export const startCheckout = createServerFn({ method: 'POST' })
     const callback = new URL('/dashboard', config.origin)
     callback.searchParams.set('order', orderCode(order.id))
     try {
-      const result = z.object({ authorization_url: z.url(), reference: z.literal(reference) }).parse(
-        await paystackRequest('/transaction/initialize', config.key, {
-          email: order.clientEmail,
-          amount: order.priceCents,
-          currency,
-          channels: ['card'],
-          reference,
-          callback_url: callback.href,
-        }),
-      )
-      if (new URL(result.authorization_url).origin !== 'https://checkout.paystack.com') {
-        throw new Error('The payment provider returned an invalid checkout address.')
-      }
+      const url = await initializePaystackCheckout(config.key, {
+        email: order.clientEmail,
+        amount: order.priceCents,
+        reference,
+        callback_url: callback.href,
+      })
       await db
         .update(orders)
-        .set({ paymentUrl: result.authorization_url })
+        .set({ paymentUrl: url })
         .where(and(eq(orders.id, order.id), eq(orders.paymentReference, reference)))
-      return { url: result.authorization_url }
+      return { url }
     } catch {
       const current = await findAccessibleOrder(data.code, customer)
       if (current?.paymentUrl) return { url: current.paymentUrl }
