@@ -28,7 +28,7 @@ import {
   type OrderFileView,
   type OrderView,
 } from '@/lib/orders'
-import { formatUSD } from '@/lib/pricing'
+import { assignmentTypeLabel, formatOrderLength, formatUSD, orderServices } from '@/lib/pricing'
 import { refreshPayment, startCheckout } from '@/lib/payments.functions'
 
 export function OrderPanel({
@@ -234,9 +234,12 @@ export function OrderPanel({
           {order.title}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          {order.type} · {order.subject} · {order.level} · {order.style} ·{' '}
-          {order.pages} pages
+          {assignmentTypeLabel(order.type)} · {order.subject} · {order.level} · {order.style} ·{' '}
+          {formatOrderLength(order.pages, order.wordCount)}
         </p>
+        {order.service !== 'writing' && (
+          <p className="mt-1 text-sm">{orderServices[order.service].label}</p>
+        )}
         <p className="mt-1 text-sm">
           {formatUSD(order.price)} USD ·{' '}
           {!staff &&

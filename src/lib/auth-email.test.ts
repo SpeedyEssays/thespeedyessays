@@ -76,6 +76,8 @@ it.each([
     expect(mail.to).toBe("old@example.test");
     const link = `https://orders.example.test/account#token_hash=${firstHash}&type=${action}`;
     expect(mail.text).toContain(`${label}: ${link}`);
+    expect(mail.text.startsWith("Dear Customer,\n\n")).toBe(true);
+    expect(mail.html).toContain(">Dear Customer,</p>");
     const escapedLink = link.replace("&", "&amp;");
     expect(mail.html).toContain(`href="${escapedLink}"`);
     expect(mail.html).toContain(`>${label}</a>`);

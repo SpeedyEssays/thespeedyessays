@@ -17,7 +17,7 @@ it.each(["client", "support"])(
         id: 2,
         sender: "support",
         supportName: "Marvin",
-        body: "Staff reply",
+        body: "Dear Customer,\n\nStaff reply",
         at: "2026-11-21T14:12:00.000Z",
       },
     ];
@@ -40,7 +40,8 @@ it.each(["client", "support"])(
       "datetime",
       rows[1].at,
     );
-    expect(screen.getByText("Marvin Support")).toBeInTheDocument();
+    expect(screen.getByText("Marvin Support:")).toBeInTheDocument();
+    expect(reply.closest("li")).toHaveTextContent("Dear Customer,Staff reply");
   },
 );
 

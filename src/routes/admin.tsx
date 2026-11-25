@@ -27,7 +27,9 @@ import {
 import { getServerUser } from '@/lib/identity.functions'
 import { statusMeta, type AdminOrderView } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
+import { recordStaffActivity } from '@/lib/staff-presence.functions'
 import { supportNameRequired } from '@/lib/support-name'
+import { useVisibleActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
 import { cn } from '@/lib/utils'
 
@@ -84,6 +86,7 @@ function Admin() {
   const { tab = 'chat', customer, chat } = Route.useSearch()
   const orders = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
+  useVisibleActivity(recordStaffActivity, Boolean(supportName))
   const { data: counts, refresh: refreshUnread } = useInboxData(getStaffInboxCounts)
   const online = new Set(counts?.onlineCustomers)
   return (
@@ -95,7 +98,7 @@ function Admin() {
         </div>
         {supportName && (
           <p className="mt-2 text-sm text-muted-foreground">
-            Replying as {supportName} Support
+            Replying as {supportName} Support:
           </p>
         )}
       </header>

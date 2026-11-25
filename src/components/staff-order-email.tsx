@@ -11,6 +11,10 @@ import {
   type OrderEmailKind,
 } from "@/lib/order-email";
 import {
+  customerGreeting,
+  withoutCustomerGreeting,
+} from "@/lib/customer-greeting";
+import {
   checkOrderEmailConnection,
   getOrderEmailDetails,
   notifyOrderCustomer,
@@ -127,7 +131,7 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
       return;
 
     const { recipient } = details;
-    const message = note.trim();
+    const message = withoutCustomerGreeting(note);
     const signature = JSON.stringify([order.code, kind, recipient, message]);
     if (request.current?.signature !== signature) {
       request.current = { signature, id: crypto.randomUUID() };
@@ -222,6 +226,7 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
         </div>
         <div className="rounded-md bg-muted/50 p-3 text-sm">
           <p className="font-medium">{orderEmailSubject(kind, order.code)}</p>
+          <p className="mt-2">{customerGreeting}</p>
           <p className="mt-1 text-muted-foreground">{template.body}</p>
         </div>
         <div className="space-y-1.5">

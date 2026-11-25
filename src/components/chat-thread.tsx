@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { customerGreeting, supportSenderLabel, withoutCustomerGreeting } from '@/lib/customer-greeting'
 import { LocalTime } from './local-time'
 
 type Message = {
@@ -43,8 +44,10 @@ export function ChatThread({
   emptyText: string
   replyNotice?: string
 }) {
+  const composingAsSupport = ownSender === 'agent' || ownSender === 'support'
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [body, setBody] = useState('')
+  const draft = composingAsSupport ? withoutCustomerGreeting(body) : body.trim()
   const [pending, setPending] = useState(false)
   const [sendError, setSendError] = useState(false)
   const [loadError, setLoadError] = useState(false)
@@ -128,11 +131,11 @@ export function ChatThread({
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!body.trim() || pending) return
+    if (!draft || pending) return
     setPending(true)
     setSendError(false)
     try {
-      await send(body)
+      await send(draft)
       setBody('')
       if (unreadThrough) void confirmRead(unreadThrough)
       try {
@@ -164,35 +167,34 @@ export function ChatThread({
           <p className="text-sm text-muted-foreground">{emptyText}</p>
         )}
         <ol className="space-y-3">
-          {messages?.map((message) => (
-            <li
-              key={message.id}
-              className={`rounded-md p-2 ${message.sender === ownSender ? 'bg-secondary' : 'bg-card'}`}
-            >
-              <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-x-3">
-                <p className="text-xs font-semibold">
-                  {message.supportName
-                    ? `${message.supportName} Support`
-                    : message.sender === ownSender
-                      ? ownLabel
-                      : otherLabel}
+          {messages?.map((message) => {
+            const ownMessage = message.sender === ownSender
+            const fromSupport = message.sender === 'agent' || message.sender === 'support'
+            const label = fromSupport
+              ? supportSenderLabel(message.supportName)
+              : ownMessage ? ownLabel : otherLabel
+            return (
+              <li key={message.id} className={`rounded-md p-2 ${ownMessage ? 'bg-secondary' : 'bg-card'}`}>
+                <div className="mb-0.5 flex flex-wrap items-baseline justify-between gap-x-3">
+                  <p className="text-xs font-semibold">{label}</p>
+                  <LocalTime at={message.at} className="text-xs text-muted-foreground" />
+                </div>
+                {fromSupport && <p className="mb-2 text-sm">{customerGreeting}</p>}
+                <p className="whitespace-pre-wrap break-words text-sm">
+                  {fromSupport ? withoutCustomerGreeting(message.body) : message.body}
                 </p>
-                <LocalTime at={message.at} className="text-xs text-muted-foreground" />
-              </div>
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {message.body}
-              </p>
-              {message.sender === ownSender && message.readAt !== undefined && (
-                <p className={`mt-1 text-right text-xs ${
-                  message.readAt
-                    ? 'font-semibold text-sky-700 dark:text-sky-300'
-                    : 'text-muted-foreground'
-                }`}>
-                  {message.readAt ? 'Read' : 'Delivered'}
-                </p>
-              )}
-            </li>
-          ))}
+                {ownMessage && message.readAt !== undefined && (
+                  <p className={`mt-1 text-right text-xs ${
+                    message.readAt
+                      ? 'font-semibold text-sky-700 dark:text-sky-300'
+                      : 'text-muted-foreground'
+                  }`}>
+                    {message.readAt ? 'Read' : 'Delivered'}
+                  </p>
+                )}
+              </li>
+            )
+          })}
         </ol>
       </div>
       {markRead && unreadThrough && unreadThrough > markedThrough && lastMessageId && (
@@ -225,6 +227,7 @@ export function ChatThread({
         <p className="text-sm text-muted-foreground">{replyNotice}</p>
       ) : (
         <form onSubmit={submit} className="space-y-2">
+          {composingAsSupport && <p className="text-sm font-medium">{customerGreeting}</p>}
           <Textarea
             aria-label="Message"
             placeholder="Write a message"
@@ -234,7 +237,7 @@ export function ChatThread({
             onChange={(event) => setBody(event.target.value)}
             required
           />
-          <Button disabled={pending || !body.trim()} size="sm">
+          <Button disabled={pending || !draft} size="sm">
             {pending ? 'Sending…' : 'Send message'}
           </Button>
         </form>

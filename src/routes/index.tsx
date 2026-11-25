@@ -88,7 +88,7 @@ function Home() {
             >
               <Stars rating={5} />
               <span className="font-semibold">{stats.rating}/5</span>
-              <span className="text-muted-foreground">from {stats.reviewCount.toLocaleString()} verified reviews</span>
+              <span className="text-muted-foreground">from {stats.reviewCount.toLocaleString('en-US')} verified reviews</span>
             </a>
             <h1 className="text-4xl leading-[1.05] font-semibold sm:text-5xl lg:text-6xl">
               Academic writing help from writers who’ve <em className="text-primary/80">earned</em> their degrees.

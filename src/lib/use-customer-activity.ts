@@ -2,6 +2,10 @@ import { useEffect } from "react";
 import { recordPortalActivity } from "./customer-presence.functions";
 
 export function useCustomerActivity(enabled: boolean) {
+  useVisibleActivity(recordPortalActivity, enabled);
+}
+
+export function useVisibleActivity(reportActivity: () => Promise<unknown>, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
@@ -9,7 +13,7 @@ export function useCustomerActivity(enabled: boolean) {
     function report() {
       if (document.hidden || pending) return;
       pending = true;
-      void recordPortalActivity()
+      void reportActivity()
         .catch(() => {})
         .finally(() => {
           pending = false;
@@ -23,5 +27,5 @@ export function useCustomerActivity(enabled: boolean) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", report);
     };
-  }, [enabled]);
+  }, [enabled, reportActivity]);
 }

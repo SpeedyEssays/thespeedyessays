@@ -65,6 +65,7 @@ export const notifyOrderCustomer = createServerFn({ method: "POST" })
       recipient,
       kind: data.kind,
       note: data.note,
+      supportName: context.user.supportName,
       requestId: data.requestId,
     });
   });

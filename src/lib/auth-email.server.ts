@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { customerGreeting } from "./customer-greeting";
 import { escapeEmailHtml as escapeHtml } from "./email-html.server";
 import {
   emailSiteOrigin,
@@ -71,6 +72,7 @@ function accountMessage(
 ): GmailMessage {
   const unrequested = "If you did not request this email, you can ignore it.";
   const text = [
+    customerGreeting,
     body,
     action && `${action.label}: ${action.href}`,
     action && unrequested,
@@ -92,6 +94,7 @@ function accountMessage(
 <tr><td style="padding:20px 24px;background:#192a50;color:#fff;border-bottom:4px solid #bc9559;font-size:20px;font-weight:bold">SpeedyEssays</td></tr>
 <tr><td style="padding:28px 24px">
 <h1 style="margin:0 0 14px;font-size:24px;line-height:1.25">${escapeHtml(subject)}</h1>
+<p style="margin:0 0 12px;font-size:15px">${customerGreeting}</p>
 <p style="margin:0;line-height:1.6;font-size:15px">${escapeHtml(body)}</p>
 ${button}
 </td></tr></table></td></tr></table></body></html>`;

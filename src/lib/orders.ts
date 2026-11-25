@@ -1,6 +1,8 @@
 // Order vocabulary shared by the client dashboard, the admin console and the
 // server functions that persist orders.
 
+import type { OrderService } from './pricing'
+
 export const orderStatuses = [
   'awaiting-payment',
   'paid',
@@ -108,11 +110,13 @@ export type OrderView = {
   code: string
   title: string
   type: string
+  service: OrderService
   subject: string
   level: string
   style: string
   sources: number
   pages: number
+  wordCount: number | null
   dueAt: string
   agreedDueAt: string | null
   placedAt: string

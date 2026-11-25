@@ -34,12 +34,22 @@ describe("order email", () => {
     "renders the %s template with the correct order link",
     (kind) => {
       const { subject, text, html } = renderOrderEmail(
-        { ...delivery, kind },
+        {
+          ...delivery,
+          kind,
+          note: "Dear Customer,\n\n" + delivery.note,
+          supportName: "Phoebe",
+        },
         config.origin,
       );
       const link = "https://orders.example.test/dashboard?order=SE-48001";
       expect(subject).toContain("SE-48001");
       expect(text).toContain(link);
+      expect(text.startsWith("Dear Customer,\n\n")).toBe(true);
+      expect(text.match(/Dear Customer,/g)).toHaveLength(1);
+      expect(html.match(/Dear Customer,/g)).toHaveLength(1);
+      expect(text).toContain("Phoebe Support:");
+      expect(html).toContain(">Phoebe Support:</strong>");
       expect(html).toContain(`href="${link}"`);
       expect(html).toContain("&lt;img");
       expect(html).toContain("portal &amp; reply.");

@@ -254,4 +254,4 @@ export const reviews: Review[] = [
   { id: 'r6', name: 'Marcus T.', level: "Master's", subject: 'Nursing', rating: 5, body: 'Professional, on time, and confidential. I never had to share my email or phone with the writer.', date: '2026-08-22', source: 'Verified order' },
 ]
 
-export const stats = { rating: 4.9, reviewCount: 3184, writers: 412, ordersDelivered: 58230, onTime: 98.7 }
+export const stats = { rating: 4.9, reviewCount: 1027, writers: 218, ordersDelivered: 8000, onTime: 98.7 }

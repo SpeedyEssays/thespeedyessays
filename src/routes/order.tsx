@@ -11,6 +11,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { PortalShell } from '@/components/portal-shell'
+import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
 import { getServerUser } from '@/lib/identity.functions'
 import { uploadOrderFile } from '@/lib/files.functions'
 import { createOrder } from '@/lib/orders.functions'
@@ -19,25 +20,45 @@ import { checkOrderFile, MAX_ORDER_FILES_PER_UPLOAD, orderFileAccept } from '@/l
 import {
   academicLevels,
   assignmentTypes,
+  assignmentTypeLabel,
   deadlines,
   estimatePrice,
   extraPrices,
   formatUSD,
+  formatOrderLength,
   formattingStyles,
+  maxOrderLength,
+  orderServiceIds,
+  orderServices,
+  parseOrderLength,
+  quoteLength,
   type AcademicLevelId,
+  type AssignmentType,
   type DeadlineId,
   type Extras,
+  type OrderLength,
+  type OrderService,
 } from '@/lib/pricing'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { cn } from '@/lib/utils'
 
-type OrderSearch = { level?: AcademicLevelId; deadline?: DeadlineId; pages?: number }
+type OrderSearch = {
+  level?: AcademicLevelId
+  deadline?: DeadlineId
+  type?: AssignmentType
+  service?: OrderService
+  pages?: number
+  words?: number
+}
 
 export const Route = createFileRoute('/order')({
   validateSearch: (search: Record<string, unknown>): OrderSearch => ({
     level: academicLevels.some((l) => l.id === search.level) ? (search.level as AcademicLevelId) : undefined,
     deadline: deadlines.some((d) => d.id === search.deadline) ? (search.deadline as DeadlineId) : undefined,
-    pages: Number.isFinite(Number(search.pages)) && Number(search.pages) > 0 ? Number(search.pages) : undefined,
+    type: assignmentTypes.find((type) => type === search.type),
+    service: orderServiceIds.find((service) => service === search.service),
+    pages: parseOrderLength(search.pages, 'pages'),
+    words: parseOrderLength(search.words, 'words'),
   }),
   beforeLoad: async ({ location }) => {
     const user = await getServerUser()
@@ -55,13 +76,14 @@ const subjects = ['Nursing', 'Business', 'History', 'Psychology', 'Economics', '
 const steps = ['Assignment', 'Length & deadline', 'Instructions', 'Review'] as const
 
 type FormState = {
-  type: string
+  type: AssignmentType
+  service: OrderService
   subject: string
   topic: string
   level: AcademicLevelId
   style: string
   sources: string
-  pages: number
+  length: OrderLength
   deadline: DeadlineId
   extras: Extras
   instructions: string
@@ -80,20 +102,25 @@ function OrderPage() {
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState<FormState>({
-    type: 'Essay',
+    type: search.type ?? 'Essay',
+    service: search.service ?? 'writing',
     subject: '',
     topic: '',
     level: search.level ?? 'undergraduate',
     style: 'APA 7',
     sources: '5',
-    pages: Math.min(200, search.pages ?? 3),
+    length: search.words !== undefined
+      ? { unit: 'words', amount: String(search.words) }
+      : { unit: 'pages', amount: String(search.pages ?? 3) },
     deadline: search.deadline ?? '7d',
     extras: {},
     instructions: '',
     files: [],
     agree: false,
   })
-  const quote = estimatePrice(form)
+  const length = quoteLength(form.length)
+  const quote = estimatePrice({ ...form, ...length })
+  const validLength = parseOrderLength(form.length.amount, form.length.unit) !== undefined
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -106,6 +133,8 @@ function OrderPage() {
       if (!form.subject) e.subject = 'Choose a subject'
       if (form.topic.trim().length < 4) e.topic = 'Add a topic or working title'
     }
+    if (s === 1 && !validLength)
+      e.length = `Enter 1 to ${maxOrderLength(form.length.unit).toLocaleString('en-US')} ${form.length.unit}.`
     if (s === 2 && form.instructions.trim().length < 20 && form.files.length === 0) {
       e.instructions = 'Add at least a sentence of instructions or upload your prompt'
     }
@@ -136,11 +165,13 @@ function OrderPage() {
     submission.current ??= crypto.randomUUID()
     try {
       const { code } = await createOrder({ data: {
-        type: form.type as (typeof assignmentTypes)[number],
+        type: form.type,
+        service: form.service,
         style: form.style as (typeof formattingStyles)[number],
         topic: form.topic,
         subject: form.subject,
-        pages: form.pages,
+        pages: quote.pages,
+        wordCount: length.wordCount,
         level: form.level,
         deadline: form.deadline,
         sources: Number(form.sources),
@@ -242,18 +273,8 @@ function OrderPage() {
 
           {step === 0 && (
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field label="Type of assignment" id="type">
-                <Select value={form.type} onValueChange={(v) => set('type', v)}>
-                  <SelectTrigger id="type" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignmentTypes.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+              <OrderServiceField id="service" value={form.service} onChange={(service) => set('service', service)} />
+              <PaperTypeField id="type" value={form.type} onChange={(type) => set('type', type)} />
               <Field label="Subject" id="subject" error={errors.subject}>
                 <Select value={form.subject} onValueChange={(v) => set('subject', v)}>
                   <SelectTrigger id="subject" className="w-full" aria-invalid={!!errors.subject}>
@@ -317,17 +338,13 @@ function OrderPage() {
 
           {step === 1 && (
             <div className="space-y-6">
-              <Field label="Pages" id="pages" hint={`≈ ${quote.words.toLocaleString()} words, double-spaced`}>
-                <Input
-                  id="pages"
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={form.pages}
-                  onChange={(e) => set('pages', Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
-                  className="max-w-32"
-                />
-              </Field>
+              <OrderLengthField
+                id="order-length"
+                length={form.length}
+                onChange={(value) => set('length', value)}
+                quote={quote}
+                error={errors.length}
+              />
               <fieldset>
                 <legend className="mb-2 text-sm font-medium">Deadline</legend>
                 <RadioGroup
@@ -336,7 +353,7 @@ function OrderPage() {
                   className="grid grid-cols-2 gap-2 sm:grid-cols-3"
                 >
                   {deadlines.map((d) => {
-                    const price = estimatePrice({ ...form, deadline: d.id, extras: {} }).base
+                    const price = estimatePrice({ ...form, ...length, deadline: d.id, extras: {} }).base
                     return (
                       <Label
                         key={d.id}
@@ -350,7 +367,7 @@ function OrderPage() {
                           <RadioGroupItem id={`dl-${d.id}`} value={d.id} />
                           {d.label}
                         </span>
-                        <span className="text-xs text-muted-foreground tabular-nums">{formatUSD(price)}</span>
+                        <span className="text-xs text-muted-foreground tabular-nums">{validLength ? formatUSD(price) : '—'}</span>
                       </Label>
                     )
                   })}
@@ -449,11 +466,12 @@ function OrderPage() {
           {step === 3 && (
             <div className="space-y-6">
               <dl className="grid gap-x-6 gap-y-3 rounded-xl bg-muted/50 p-5 text-sm sm:grid-cols-2">
-                <Summary label="Assignment" value={`${form.type} · ${form.subject}`} />
+                <Summary label="Assignment" value={`${assignmentTypeLabel(form.type)} · ${form.subject}`} />
+                <Summary label="Service" value={orderServices[form.service].label} />
                 <Summary label="Topic" value={form.topic} />
                 <Summary label="Level" value={academicLevels.find((l) => l.id === form.level)?.label} />
                 <Summary label="Style" value={`${form.style} · ${form.sources} sources`} />
-                <Summary label="Length" value={`${form.pages} pages (≈ ${quote.words.toLocaleString()} words)`} />
+                <Summary label="Length" value={formatOrderLength(quote.pages, length.wordCount)} />
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
                 <Summary label="Attachments" value={form.files.length ? `${form.files.length} file(s)` : 'None'} />
               </dl>
@@ -498,7 +516,8 @@ function OrderPage() {
           <div className="rounded-2xl border bg-card p-6">
             <h2 className="text-lg font-semibold">Order summary</h2>
             <dl className="mt-4 space-y-2 text-sm">
-              <Row label={`${quote.pages} page${quote.pages > 1 ? 's' : ''} × ${formatUSD(quote.perPage)}`} value={formatUSD(quote.base)} />
+              <Row label="Service" value={orderServices[form.service].label} />
+              {validLength && <Row label={`${quote.pages.toLocaleString('en-US')} page${quote.pages > 1 ? 's' : ''} × ${formatUSD(quote.perPage)}`} value={formatUSD(quote.base)} />}
               {quote.extras > 0 && <Row label="Extras" value={formatUSD(quote.extras)} />}
               <Row label="Originality report" value="Free" />
               <Row label="Title page & bibliography" value="Free" />
@@ -506,7 +525,7 @@ function OrderPage() {
             </dl>
             <div className="mt-4 flex items-baseline justify-between border-t pt-4">
               <span className="font-medium">Total</span>
-              <span className="font-display text-3xl font-semibold tabular-nums">{formatUSD(quote.total)}</span>
+              <span className="font-display text-3xl font-semibold tabular-nums">{validLength ? formatUSD(quote.total) : '—'}</span>
             </div>
           </div>
         </aside>

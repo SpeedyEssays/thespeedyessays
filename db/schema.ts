@@ -10,6 +10,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
+import type { OrderService } from '../src/lib/pricing'
 
 // Orders placed by signed-in clients. Price is recomputed on the server from
 // src/lib/pricing.ts and stored in cents.
@@ -26,12 +27,14 @@ export const orders = pgTable(
     paidAt: timestamp('paid_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     type: text().notNull(),
+    service: text().$type<OrderService>().notNull().default('writing'),
     subject: text().notNull(),
     topic: text().notNull(),
     level: text().notNull(),
     style: text().notNull(),
     sources: integer().notNull().default(0),
     pages: integer().notNull(),
+    wordCount: integer('word_count'),
     deadlineOption: text('deadline_option').notNull(),
     dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
     agreedDueAt: timestamp('agreed_due_at', { withTimezone: true }),
@@ -167,5 +170,12 @@ export const customerProfiles = pgTable.withRLS('customer_profiles', {
 // Visible-page activity is recorded by the portal server for staff use.
 export const customerPresence = pgTable.withRLS('customer_presence', {
   userId: text('user_id').primaryKey(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+})
+
+// Staff availability is reported only from authenticated staff portal pages.
+export const staffPresence = pgTable.withRLS('staff_presence', {
+  userId: text('user_id').primaryKey(),
+  supportName: text('support_name').notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
 })

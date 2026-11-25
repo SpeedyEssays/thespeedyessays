@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Clock, FileText, Minus, Plus } from 'lucide-react'
+import { ArrowRight, Clock } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { academicLevels, deadlines, estimatePrice, formatUSD, type AcademicLevelId, type DeadlineId } from '@/lib/pricing'
+import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
+import {
+  academicLevels, deadlines, estimatePrice, formatUSD, maxOrderLength, parseOrderLength, quoteLength,
+  type AcademicLevelId, type AssignmentType, type DeadlineId, type OrderLength, type OrderService,
+} from '@/lib/pricing'
 import { cn } from '@/lib/utils'
 
 import { PaymentBadges } from './trust-badges'
@@ -12,9 +15,13 @@ import { PaymentBadges } from './trust-badges'
 export function PricingCalculator({ className }: { className?: string }) {
   const [level, setLevel] = useState<AcademicLevelId>('undergraduate')
   const [deadline, setDeadline] = useState<DeadlineId>('7d')
-  const [pages, setPages] = useState(3)
-  const quote = estimatePrice({ level, deadline, pages })
-  const relaxed = estimatePrice({ level, deadline: '14d', pages })
+  const [type, setType] = useState<AssignmentType>('Essay')
+  const [service, setService] = useState<OrderService>('writing')
+  const [length, setLength] = useState<OrderLength>({ unit: 'pages', amount: '3' })
+  const validLength = parseOrderLength(length.amount, length.unit) !== undefined
+  const input = { level, service, ...quoteLength(length) }
+  const quote = estimatePrice({ ...input, deadline })
+  const relaxed = estimatePrice({ ...input, deadline: '14d' })
 
   return (
     <div className={cn('rounded-2xl border bg-card p-6 shadow-xl shadow-primary/5 sm:p-8', className)}>
@@ -24,6 +31,10 @@ export function PricingCalculator({ className }: { className?: string }) {
       </div>
 
       <div className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <OrderServiceField id="calc-service" value={service} onChange={setService} />
+          <PaperTypeField id="calc-type" value={type} onChange={setType} />
+        </div>
         <fieldset>
           <legend className="mb-2 text-sm font-medium">Academic level</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -67,50 +78,42 @@ export function PricingCalculator({ className }: { className?: string }) {
           </div>
         </fieldset>
 
-        <div>
-          <Label htmlFor="calc-pages" className="mb-2 flex items-center gap-1.5">
-            <FileText className="size-4 text-muted-foreground" /> Pages
-            <span className="ml-auto text-xs font-normal text-muted-foreground">
-              ≈ {quote.words.toLocaleString()} words · double-spaced
-            </span>
-          </Label>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" aria-label="Fewer pages" onClick={() => setPages((p) => Math.max(1, p - 1))}>
-              <Minus />
-            </Button>
-            <input
-              id="calc-pages"
-              type="range"
-              min={1}
-              max={40}
-              value={pages}
-              onChange={(e) => setPages(Number(e.target.value))}
-              className="h-2 flex-1 cursor-pointer accent-[var(--primary)]"
-            />
-            <Button variant="outline" size="icon" aria-label="More pages" onClick={() => setPages((p) => Math.min(40, p + 1))}>
-              <Plus />
-            </Button>
-            <span className="w-10 text-center text-lg font-semibold tabular-nums">{pages}</span>
-          </div>
-        </div>
+        <OrderLengthField
+          id="calc-length"
+          length={length}
+          onChange={setLength}
+          quote={quote}
+          error={validLength ? undefined : `Enter 1 to ${maxOrderLength(length.unit).toLocaleString('en-US')} ${length.unit}.`}
+        />
       </div>
 
       <div className="mt-8 flex flex-col gap-4 rounded-xl bg-secondary p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Estimated total</p>
           <p className="font-display text-4xl font-semibold tabular-nums" aria-live="polite">
-            {formatUSD(quote.total)}
+            {validLength ? formatUSD(quote.total) : '—'}
           </p>
           <p className="text-xs text-muted-foreground">
             {formatUSD(quote.perPage)} per page
-            {quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
+            {validLength && quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
           </p>
         </div>
-        <Button size="lg" asChild>
-          <Link to="/order" search={{ level, deadline, pages }}>
-            Continue to order <ArrowRight />
-          </Link>
-        </Button>
+        {validLength ? (
+          <Button size="lg" asChild>
+            <Link to="/order" search={{
+              level,
+              deadline,
+              type,
+              service,
+              pages: length.unit === 'pages' ? quote.pages : undefined,
+              words: input.wordCount,
+            }}>
+              Continue to order <ArrowRight />
+            </Link>
+          </Button>
+        ) : (
+          <Button size="lg" disabled>Continue to order <ArrowRight /></Button>
+        )}
       </div>
       <PaymentBadges className="mt-5" />
     </div>

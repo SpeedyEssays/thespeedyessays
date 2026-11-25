@@ -1,6 +1,11 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../../db";
+import {
+  customerGreeting,
+  supportSenderLabel,
+  withoutCustomerGreeting,
+} from "./customer-greeting";
 import { escapeEmailHtml as escapeHtml } from "./email-html.server";
 import {
   checkGmail,
@@ -46,27 +51,31 @@ type OrderEmail = {
   code: string;
   kind: OrderEmailKind;
   note: string;
+  supportName?: string | null;
 };
 
 export function renderOrderEmail(
-  { code, kind, note }: OrderEmail,
+  { code, kind, note: suppliedNote, supportName }: OrderEmail,
   origin: string,
 ) {
   const template = orderEmailTemplates[kind];
+  const note = withoutCustomerGreeting(suppliedNote);
+  const sender = supportSenderLabel(supportName);
   const url = new URL("/dashboard", origin);
   url.searchParams.set("order", code);
   const text = [
+    customerGreeting,
     template.heading,
     `Order ${code}`,
     template.body,
-    note ? `Message from support:\n${note}` : "",
+    note ? `${sender}\n${note}` : "",
     `${template.button}: ${url.href}`,
     "SpeedyEssays Support",
   ]
     .filter(Boolean)
     .join("\n\n");
   const noteMarkup = note
-    ? `<p style="padding:14px 16px;background:#f1f3f7;line-height:1.55"><strong>Message from support</strong><br>${escapeHtml(note).replace(/\r\n|\n|\r/g, "<br>")}</p>`
+    ? `<p style="padding:14px 16px;background:#f1f3f7;line-height:1.55"><strong>${escapeHtml(sender)}</strong><br>${escapeHtml(note).replace(/\r\n|\n|\r/g, "<br>")}</p>`
     : "";
   const html = `<!doctype html>
 <html lang="en"><body style="margin:0;background:#f7f5ef;color:#192a50;font-family:Arial,sans-serif">
@@ -77,6 +86,7 @@ export function renderOrderEmail(
 <tr><td style="padding:24px">
 <p style="margin:0 0 8px;font-size:13px;color:#475569">Order ${escapeHtml(code)}</p>
 <h1 style="margin:0 0 14px;font-size:24px">${template.heading}</h1>
+<p style="line-height:1.55">${customerGreeting}</p>
 <p style="line-height:1.55">${template.body}</p>
 ${noteMarkup}
 <p style="margin:24px 0"><a href="${escapeHtml(url.href)}" style="display:inline-block;padding:12px 18px;background:#192a50;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold">${template.button}</a></p>

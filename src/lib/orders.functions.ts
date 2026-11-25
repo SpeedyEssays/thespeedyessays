@@ -23,6 +23,9 @@ import {
   deadlines,
   estimatePrice,
   formattingStyles,
+  MAX_ORDER_PAGES,
+  MAX_ORDER_WORDS,
+  orderServiceIds,
 } from './pricing'
 import { supportNameRequired } from './support-name'
 
@@ -31,12 +34,14 @@ const deadlineIds = deadlines.map((d) => d.id) as [string, ...string[]]
 
 const createOrderInput = z.object({
   type: z.enum(assignmentTypes),
+  service: z.enum(orderServiceIds).default('writing'),
   subject: z.string().trim().min(1).max(80),
   topic: z.string().trim().min(4).max(300),
   level: z.enum(levelIds),
   style: z.enum(formattingStyles),
   sources: z.coerce.number().int().min(0).max(100),
-  pages: z.number().int().min(1).max(200),
+  pages: z.number().int().min(1).max(MAX_ORDER_PAGES),
+  wordCount: z.number().int().min(1).max(MAX_ORDER_WORDS).optional(),
   deadline: z.enum(deadlineIds),
   extras: z.object({
     topWriter: z.boolean().optional(),
@@ -65,6 +70,8 @@ export const createOrder = createServerFn({ method: 'POST' })
       level: level.id,
       deadline: deadline.id,
       pages: data.pages,
+      wordCount: data.wordCount,
+      service: data.service,
       extras: data.extras,
     })
 
@@ -77,12 +84,14 @@ export const createOrder = createServerFn({ method: 'POST' })
         clientEmail: context.user.email,
         clientName: profile.displayName ?? context.user.name,
         type: data.type,
+        service: data.service,
         subject: data.subject,
         topic: data.topic,
         level: level.label,
         style: data.style,
         sources: data.sources,
         pages: quote.pages,
+        wordCount: data.wordCount,
         deadlineOption: deadline.id,
         dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
         extras: data.extras,
