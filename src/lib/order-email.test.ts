@@ -116,7 +116,9 @@ describe("order email", () => {
       "rate-limited",
     );
     fetch.mockRejectedValueOnce(new Error("Network unavailable"));
-    await expect(sendOrderEmail(config, delivery)).resolves.toBe("unconfirmed");
+    await expect(sendOrderEmail(config, delivery)).resolves.toBe(
+      "transport-error",
+    );
     fetch.mockResolvedValueOnce(Response.json({ status: "invalid" }));
     await expect(sendOrderEmail(config, delivery)).resolves.toBe("rejected");
   });
@@ -126,8 +128,68 @@ describe("order email", () => {
       .fn()
       .mockResolvedValue(Response.redirect("https://example.test/elsewhere"));
     vi.stubGlobal("fetch", fetch);
-    await expect(sendOrderEmail(config, delivery)).resolves.toBe("unconfirmed");
+    await expect(sendOrderEmail(config, delivery)).resolves.toBe(
+      "invalid-reply",
+    );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("identifies a Google sign-in redirect without following it", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        Response.redirect("https://accounts.google.com/ServiceLogin", 302),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await expect(checkGmailConnection(config)).resolves.toBe(
+      "deployment-access",
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("identifies an old deployment that has no POST function", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("<html>Script function not found: doPost</html>"),
+        ),
+    );
+    await expect(checkGmailConnection(config)).resolves.toBe(
+      "deployment-missing",
+    );
+  });
+
+  it("retries a check when Google's one-time result is missing", async () => {
+    const fetch = vi
+      .fn<(url: string, options: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(
+        Response.redirect("https://script.googleusercontent.com/macros/echo"),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ status: "ready" }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(checkGmailConnection(config)).resolves.toBe("connected");
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      config.sender.url,
+      "https://script.googleusercontent.com/macros/echo",
+      config.sender.url,
+    ]);
+  });
+
+  it("reports a missing send result without automatically sending the email again", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.redirect("https://script.googleusercontent.com/macros/echo"),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(sendOrderEmail(config, delivery)).resolves.toBe(
+      "reply-missing",
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("checks the sender without sending an email and follows Google's result URL", async () => {
@@ -143,5 +205,6 @@ describe("order email", () => {
     expect(JSON.parse(payload.payload)).toEqual({ action: "check" });
     expect(fetch.mock.calls[1][0]).toBe(result);
     expect(fetch.mock.calls[1][1].body).toBeUndefined();
+    expect(fetch.mock.calls[1][1].redirect).toBe("manual");
   });
 });

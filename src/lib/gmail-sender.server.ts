@@ -20,6 +20,16 @@ const responseSchema = z.object({
     "unavailable",
   ]),
 });
+type SenderRequest = { action: "check" } | (GmailMessage & { action: "send" });
+type SenderResult =
+  | z.infer<typeof responseSchema>["status"]
+  | "deployment-access"
+  | "deployment-missing"
+  | "reply-missing"
+  | "invalid-reply"
+  | "google-busy"
+  | "timed-out"
+  | "transport-error";
 
 export function gmailSenderConfig(): SenderConfig | null {
   const value = process.env.SPEEDYESSAYS_EMAIL_URL?.trim();
@@ -62,8 +72,10 @@ export function emailSiteOrigin() {
 
 async function senderRequest(
   config: SenderConfig,
-  request: { action: "check" } | (GmailMessage & { action: "send" }),
-) {
+  request: SenderRequest,
+  signal: AbortSignal,
+): Promise<SenderResult> {
+  let readingReply = false;
   try {
     const payload = JSON.stringify(request);
     const timestamp = Math.floor(Date.now() / 1000);
@@ -81,36 +93,76 @@ async function senderRequest(
       encoder.encode(`${timestamp}.${payload}`),
     );
     const signature = btoa(String.fromCharCode(...new Uint8Array(bytes)));
-    const signal = AbortSignal.timeout(12_000);
     let response = await fetch(config.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payload, timestamp, signature }),
       redirect: "manual",
+      cache: "no-store",
       signal,
     });
     if ([301, 302, 303].includes(response.status)) {
       // Apps Script ContentService redirects only the result to its Google host.
       const location = response.headers.get("Location");
-      if (!location || !URL.canParse(location)) return "unavailable";
-      const redirect = new URL(location);
-      if (redirect.origin !== "https://script.googleusercontent.com") {
-        return "unavailable";
+      if (!location || !URL.canParse(location, config.url))
+        return "invalid-reply";
+      const redirect = new URL(location, config.url);
+      if (redirect.origin === "https://accounts.google.com") {
+        return "deployment-access";
       }
-      response = await fetch(redirect.href, { redirect: "error", signal });
+      if (redirect.origin !== "https://script.googleusercontent.com") {
+        return "invalid-reply";
+      }
+      readingReply = true;
+      response = await fetch(redirect.href, {
+        redirect: "manual",
+        cache: "no-store",
+        signal,
+      });
+      if (response.status >= 300 && response.status < 400)
+        return "invalid-reply";
     }
-    if (!response.ok) return "unavailable";
-    const result = responseSchema.safeParse(await response.json());
-    return result.data?.status ?? "unavailable";
+    if ([404, 410].includes(response.status)) {
+      return readingReply ? "reply-missing" : "deployment-missing";
+    }
+    if ([401, 403].includes(response.status)) return "deployment-access";
+    if (response.status === 429) return "google-busy";
+    if (!response.ok) return "transport-error";
+
+    const body = await response.text();
+    try {
+      const result = responseSchema.safeParse(JSON.parse(body));
+      return result.data?.status ?? "invalid-reply";
+    } catch {
+      if (/script function not found:\s*doPost/i.test(body))
+        return "deployment-missing";
+      if (
+        /authorization (?:is )?required|accounts\.google\.com\/servicelogin/i.test(
+          body,
+        )
+      ) {
+        return "deployment-access";
+      }
+      return "invalid-reply";
+    }
   } catch {
-    return "unavailable";
+    return signal.aborted ? "timed-out" : "transport-error";
   }
 }
 
 export function sendGmail(config: SenderConfig, message: GmailMessage) {
-  return senderRequest(config, { action: "send", ...message });
+  return senderRequest(
+    config,
+    { action: "send", ...message },
+    AbortSignal.timeout(25_000),
+  );
 }
 
-export function checkGmail(config: SenderConfig) {
-  return senderRequest(config, { action: "check" });
+export async function checkGmail(config: SenderConfig) {
+  const signal = AbortSignal.timeout(25_000);
+  const result = await senderRequest(config, { action: "check" }, signal);
+  // Google may lose the one-time result URL. A fresh check cannot send mail.
+  return result === "reply-missing" && !signal.aborted
+    ? senderRequest(config, { action: "check" }, signal)
+    : result;
 }

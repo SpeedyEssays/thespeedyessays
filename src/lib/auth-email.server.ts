@@ -1,8 +1,8 @@
 import { z } from "zod";
+import { escapeEmailHtml as escapeHtml } from "./email-html.server";
 import {
   emailSiteOrigin,
   gmailSenderConfig,
-  sendGmail,
   type GmailMessage,
 } from "./gmail-sender.server";
 
@@ -10,22 +10,27 @@ const linkTemplates = {
   signup: [
     "Confirm your SpeedyEssays account",
     "Confirm your email address to finish creating your account.",
+    "Confirm email address",
   ],
   invite: [
     "Your SpeedyEssays invitation",
     "Accept your invitation and set your password.",
+    "Accept invitation",
   ],
   magiclink: [
     "Sign in to SpeedyEssays",
     "Use this link to sign in to your account.",
+    "Sign in to SpeedyEssays",
   ],
   recovery: [
     "Reset your SpeedyEssays password",
     "Use this link to choose a new password.",
+    "Reset password",
   ],
   email_change: [
     "Confirm your SpeedyEssays email change",
     "Confirm this address to continue changing the email on your account.",
+    "Confirm email change",
   ],
 } as const;
 
@@ -62,8 +67,35 @@ function accountMessage(
   to: string,
   subject: string,
   body: string,
+  action?: { label: string; href: string },
 ): GmailMessage {
-  return { id: `auth:${id}`, to, subject, text: `${body}\n\nSpeedyEssays` };
+  const unrequested = "If you did not request this email, you can ignore it.";
+  const text = [
+    body,
+    action && `${action.label}: ${action.href}`,
+    action && unrequested,
+    "SpeedyEssays",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const link = action ? escapeHtml(action.href) : "";
+  const button = action
+    ? `<p style="margin:26px 0"><a href="${link}" style="display:inline-block;padding:13px 20px;border-radius:6px;background:#192a50;color:#fff;font-size:15px;font-weight:bold;text-decoration:none">${escapeHtml(action.label)}</a></p>
+<p style="margin:0 0 6px;color:#475569;font-size:13px">If the button doesn’t open, copy this link into your browser.</p>
+<p style="margin:0 0 22px;line-height:1.5;font-size:13px;word-break:break-all"><a href="${link}" style="color:#192a50">${link}</a></p>
+<p style="margin:0;color:#475569;line-height:1.5;font-size:13px">${unrequested}</p>`
+    : "";
+  const html = `<!doctype html>
+<html lang="en"><body style="margin:0;background:#f7f5ef;font-family:Arial,Helvetica,sans-serif;color:#192a50">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:560px;background:#fff;border:1px solid #dedad2">
+<tr><td style="padding:20px 24px;background:#192a50;color:#fff;border-bottom:4px solid #bc9559;font-size:20px;font-weight:bold">SpeedyEssays</td></tr>
+<tr><td style="padding:28px 24px">
+<h1 style="margin:0 0 14px;font-size:24px;line-height:1.25">${escapeHtml(subject)}</h1>
+<p style="margin:0;line-height:1.6;font-size:15px">${escapeHtml(body)}</p>
+${button}
+</td></tr></table></td></tr></table></body></html>`;
+  return { id: `auth:${id}`, to, subject, text, html };
 }
 
 function linkMessage(
@@ -77,13 +109,11 @@ function linkMessage(
     throw new Error("Invalid email token.");
   const link = new URL("/account", origin);
   link.hash = new URLSearchParams({ token_hash: token, type }).toString();
-  const [subject, instruction] = linkTemplates[type];
-  return accountMessage(
-    id,
-    to,
-    subject,
-    `${instruction}\n\n${link.href}\n\nIf you did not request this email, you can ignore it.`,
-  );
+  const [subject, instruction, label] = linkTemplates[type];
+  return accountMessage(id, to, subject, instruction, {
+    href: link.href,
+    label,
+  });
 }
 
 function createMessages(body: string, id: string, origin: string) {
@@ -151,15 +181,7 @@ function createMessages(body: string, id: string, origin: string) {
   throw new Error("Unsupported account email.");
 }
 
-export type AuthEmailJob = { mail: GmailMessage; queuedAt: number };
-type Producer = {
-  sendBatch(messages: { body: AuthEmailJob }[]): Promise<void>;
-};
-type PendingEmail = {
-  body: AuthEmailJob;
-  ack(): void;
-  retry(options: { delaySeconds: number }): void;
-};
+type EnqueueEmail = (id: string, messages: GmailMessage[]) => Promise<void>;
 
 async function readHookBody(request: Request) {
   const reader = request.body?.getReader();
@@ -218,12 +240,15 @@ function hookError(status: number, message: string) {
   return Response.json({ error: { http_code: status, message } }, { status });
 }
 
-export async function receiveAuthEmail(request: Request, queue?: Producer) {
+export async function receiveAuthEmail(
+  request: Request,
+  enqueue?: EnqueueEmail,
+) {
   if (request.method !== "POST")
     return new Response(null, { status: 405, headers: { Allow: "POST" } });
   const origin = emailSiteOrigin();
   const secret = process.env.SUPABASE_EMAIL_HOOK_SECRET?.trim();
-  if (!origin || !secret || !queue || !gmailSenderConfig()) {
+  if (!origin || !secret || !enqueue || !gmailSenderConfig()) {
     return hookError(503, "Account email is not configured.");
   }
   const id = request.headers.get("webhook-id") ?? "";
@@ -252,37 +277,12 @@ export async function receiveAuthEmail(request: Request, queue?: Producer) {
     return hookError(400, "Invalid account email request.");
   }
   try {
-    await queue.sendBatch(
-      emails.map((mail) => ({ body: { mail, queuedAt: Date.now() } })),
-    );
+    await enqueue(id, emails);
     return Response.json({});
   } catch {
     return hookError(
       503,
       "Account email could not be queued. Try again shortly.",
     );
-  }
-}
-
-export async function deliverAuthEmails(messages: PendingEmail[]) {
-  const config = gmailSenderConfig();
-  for (const message of messages) {
-    // Avoid retrying a link long after the customer requested it.
-    if (Date.now() - message.body.queuedAt > 10 * 60 * 1000) {
-      console.warn("An account email expired while waiting to send.");
-      message.ack();
-      continue;
-    }
-    const result = config
-      ? await sendGmail(config, message.body.mail)
-      : "unavailable";
-    if (result === "queued") {
-      message.ack();
-    } else {
-      console.warn(
-        `An account email is waiting for Gmail delivery (${result}).`,
-      );
-      message.retry({ delaySeconds: 60 });
-    }
   }
 }

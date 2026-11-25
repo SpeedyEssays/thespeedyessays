@@ -20,8 +20,9 @@ import type { AdminOrderView } from "@/lib/orders";
 type Details = Awaited<ReturnType<typeof getOrderEmailDetails>>;
 type Outcome = Awaited<ReturnType<typeof notifyOrderCustomer>>;
 type Connection = Awaited<ReturnType<typeof checkOrderEmailConnection>>;
+type PortalError = "portal-error";
 
-const problems: Record<Exclude<Outcome, "queued">, string> = {
+const problems: Record<Exclude<Outcome, "queued"> | PortalError, string> = {
   setup:
     "Email sending needs to be connected in Cloudflare. Ask the site owner to check the Gmail sender settings.",
   "credentials-rejected":
@@ -32,6 +33,25 @@ const problems: Record<Exclude<Outcome, "queued">, string> = {
     "The customer’s email address changed. Review the updated address before sending.",
   "rate-limited":
     "Gmail has reached its daily sending limit. Try again when the quota resets.",
+  "deployment-access":
+    "Google is asking Cloudflare to sign in. In Apps Script, edit the web app deployment and set Execute as to Me and Who has access to Anyone.",
+  "deployment-missing":
+    "Google could not find the deployed email script. Check that the Cloudflare URL ends in /exec and that the active Apps Script version contains doPost.",
+  "reply-missing":
+    "Google ran the script, but its result link was unavailable. Check Gmail Sent before retrying an email.",
+  "invalid-reply":
+    "Google returned an unexpected response. Open Apps Script Executions to check the latest doPost run.",
+  "google-busy":
+    "Google is temporarily limiting requests to Apps Script. Try Check connection again in a minute.",
+  "timed-out":
+    "Google did not reply within 25 seconds. Check the latest doPost run in Apps Script Executions.",
+  "transport-error":
+    "Cloudflare could not reach the Apps Script service. Check that the deployed web app is available, then run Check connection again.",
+  "sender-script-error":
+    "Apps Script returned an error. Run setUpEmailSender in the editor and check that the execution log shows Sender ready.",
+  busy: "The Gmail sender is handling another email. Wait a moment and try again.",
+  "portal-error":
+    "The staff portal did not return a result. Refresh the order and check the connection again.",
   rejected:
     "The Gmail sender rejected this email. Review the recipient and message, then try again.",
   unconfirmed:
@@ -44,8 +64,10 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
   const [refreshCount, setRefreshCount] = useState(0);
   const [selected, setSelected] = useState<OrderEmailKind | null>(null);
   const [note, setNote] = useState("");
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [connection, setConnection] = useState<Connection | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | PortalError | null>(null);
+  const [connection, setConnection] = useState<Connection | PortalError | null>(
+    null,
+  );
   const [activity, setActivity] = useState<"sending" | "checking" | null>(null);
   const busy = activity !== null;
   const sending = useRef(false);
@@ -87,7 +109,7 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
     try {
       setConnection(await checkOrderEmailConnection());
     } catch {
-      setConnection("unconfirmed");
+      setConnection("portal-error");
     } finally {
       sending.current = false;
       setActivity(null);
@@ -133,7 +155,7 @@ export function StaffOrderEmail({ order }: { order: AdminOrderView }) {
       if (result === "recipient-changed" || result === "unavailable")
         refreshRecipient();
     } catch {
-      setOutcome("unconfirmed");
+      setOutcome("portal-error");
     } finally {
       sending.current = false;
       setActivity(null);

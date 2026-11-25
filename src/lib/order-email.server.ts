@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../../db";
+import { escapeEmailHtml as escapeHtml } from "./email-html.server";
 import {
   checkGmail,
   emailSiteOrigin,
@@ -39,18 +40,6 @@ export async function orderEmailRecipient(order: {
     limit 1
   `);
   return emailAddress.safeParse(rows[0]?.email?.trim()).data ?? null;
-}
-
-const escapeMap: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => escapeMap[char]);
 }
 
 type OrderEmail = {
@@ -103,6 +92,8 @@ function gmailFailure(result: Awaited<ReturnType<typeof sendGmail>>) {
   if (result === "quota") return "rate-limited";
   if (result === "access-denied") return "credentials-rejected";
   if (result === "invalid") return "rejected";
+  if (result === "unavailable") return "sender-script-error";
+  if (result !== "ready" && result !== "queued") return result;
   return "unconfirmed";
 }
 

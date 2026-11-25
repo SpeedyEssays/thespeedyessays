@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { receiveAuthEmail, type AuthEmailJob } from "./auth-email.server";
+import { receiveAuthEmail } from "./auth-email.server";
+import type { GmailMessage } from "./gmail-sender.server";
 
 const signingKey = Buffer.alloc(32, 9);
 const firstHash = "pkce_" + "a".repeat(56);
@@ -49,42 +50,50 @@ function eventRequest(action: string, signed = true) {
 }
 
 it("rejects a request with an invalid Supabase signature", async () => {
-  const sendBatch = vi.fn();
-  const response = await receiveAuthEmail(eventRequest("signup", false), {
-    sendBatch,
-  });
+  const enqueue = vi.fn();
+  const response = await receiveAuthEmail(
+    eventRequest("signup", false),
+    enqueue,
+  );
   expect(response.status).toBe(401);
-  expect(sendBatch).not.toHaveBeenCalled();
+  expect(enqueue).not.toHaveBeenCalled();
 });
 
-it.each(["signup", "invite", "recovery", "magiclink"])(
-  "queues %s using the configured origin and the existing account link format",
-  async (action) => {
-    const sendBatch =
-      vi.fn<(messages: { body: AuthEmailJob }[]) => Promise<void>>();
-    const response = await receiveAuthEmail(eventRequest(action), {
-      sendBatch,
-    });
+it.each([
+  ["signup", "Confirm email address"],
+  ["invite", "Accept invitation"],
+  ["recovery", "Reset password"],
+  ["magiclink", "Sign in to SpeedyEssays"],
+])(
+  "queues a branded %s email with a button and a fallback link",
+  async (action, label) => {
+    const enqueue =
+      vi.fn<(id: string, messages: GmailMessage[]) => Promise<void>>();
+    const response = await receiveAuthEmail(eventRequest(action), enqueue);
     expect(response.status).toBe(200);
-    const { mail } = sendBatch.mock.calls[0][0][0].body;
+    const [id, [mail]] = enqueue.mock.calls[0];
+    expect(id).toBe("msg_test");
     expect(mail.to).toBe("old@example.test");
-    expect(mail.text).toContain(
-      `https://orders.example.test/account#token_hash=${firstHash}&type=${action}`,
-    );
-    expect(mail.text).not.toContain("untrusted.example.test");
+    const link = `https://orders.example.test/account#token_hash=${firstHash}&type=${action}`;
+    expect(mail.text).toContain(`${label}: ${link}`);
+    const escapedLink = link.replace("&", "&amp;");
+    expect(mail.html).toContain(`href="${escapedLink}"`);
+    expect(mail.html).toContain(`>${label}</a>`);
+    expect(mail.html).toContain(`>${escapedLink}</a>`);
+    expect(mail.html).toContain("SpeedyEssays");
+    expect(`${mail.html}${mail.text}`).not.toContain("untrusted.example.test");
   },
 );
 
 it("matches the two email-change links to their respective addresses", async () => {
-  const sendBatch =
-    vi.fn<(messages: { body: AuthEmailJob }[]) => Promise<void>>();
-  const response = await receiveAuthEmail(eventRequest("email_change"), {
-    sendBatch,
-  });
-  expect(response.status).toBe(200);
-  const [next, current] = sendBatch.mock.calls[0][0].map(
-    ({ body }) => body.mail,
+  const enqueue =
+    vi.fn<(id: string, messages: GmailMessage[]) => Promise<void>>();
+  const response = await receiveAuthEmail(
+    eventRequest("email_change"),
+    enqueue,
   );
+  expect(response.status).toBe(200);
+  const [next, current] = enqueue.mock.calls[0][1];
   expect(next.to).toBe("new@example.test");
   expect(next.text).toContain(firstHash);
   expect(current.to).toBe("old@example.test");

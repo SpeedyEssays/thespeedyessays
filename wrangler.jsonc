@@ -6,4 +6,15 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "keep_vars": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "AUTH_EMAIL_DELIVERY", "class_name": "AuthEmailDelivery" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "auth-email-delivery-v1",
+      "new_sqlite_classes": ["AuthEmailDelivery"],
+    },
+  ],
 }

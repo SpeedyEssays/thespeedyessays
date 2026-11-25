@@ -24,23 +24,23 @@ you control. Gmail sends from the project owner’s mailbox.
 
 ## Connect Supabase account emails
 
-Create a Cloudflare Queue called `speedyessays-auth-email` in the same account as
-the Worker. Configure the Worker to produce to it using the binding
-`AUTH_EMAIL_QUEUE` and to consume from it. The Worker’s queue handler sends the
-signed requests to the same Apps Script deployment. The queue allows the Supabase
-hook to return within its timeout while Gmail processes the message.
+The Cloudflare deployment creates `AUTH_EMAIL_DELIVERY`. It saves messages
+before the Supabase hook responds and sends them in the background through the
+same Apps Script deployment. Check the Worker’s **Bindings** tab for
+`AUTH_EMAIL_DELIVERY` and confirm **Email customer → Check connection** succeeds
+before enabling the Supabase hook.
 
 In Supabase **Authentication → Hooks**, add an HTTP **Send Email** hook with
 `https://thespeedyessays.info-speedypaper.workers.dev/api/auth-email` as its
 endpoint. Copy the hook signing secret directly into Cloudflare as the
-Production runtime secret `SUPABASE_EMAIL_HOOK_SECRET` and deploy it. Enable
-the hook once the queue and the Gmail sender are connected. Keep Supabase’s Email
-provider enabled. The hook takes over signup confirmation, invitation, and
-password reset delivery after it is enabled.
+Production runtime secret `SUPABASE_EMAIL_HOOK_SECRET` and deploy it before
+enabling the hook. Keep Supabase’s Email provider enabled. The hook sends
+branded signup confirmations, sign-in links, invitations, and password resets.
+The email button and its copyable link both open the SpeedyEssays account page.
 
 Use a test address you control to verify a signup confirmation, invitation, and
 password reset. A link opens the SpeedyEssays account page and asks the recipient
-to confirm the action. Check Cloudflare Queues and Apps Script **Executions** if
+to confirm the action. Check Cloudflare Worker logs and Apps Script **Executions** if
 delivery fails. If account emails fail during setup, disable the hook to return
 to the prior Supabase mail settings.
 
