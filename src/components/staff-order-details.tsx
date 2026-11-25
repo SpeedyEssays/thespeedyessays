@@ -3,8 +3,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { OrderLanguageField, OrderSoftwareField } from '@/components/order-requirement-fields'
+import { selectedSoftware, softwareSelectionError, type OrderLanguage, type SoftwareSelection } from '@/lib/order-requirements'
 import { updateStaffOrderDetails } from '@/lib/orders.functions'
-import type { AdminOrderView } from '@/lib/orders'
+import { canChangeUnpaidQuote, type AdminOrderView } from '@/lib/orders'
 
 export function StaffOrderDetails({
   order,
@@ -15,10 +17,19 @@ export function StaffOrderDetails({
 }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState('')
+  const [language, setLanguage] = useState<OrderLanguage | ''>(order.language ?? '')
+  const [software, setSoftware] = useState<SoftwareSelection>(order.software ?? 'none')
+  const [softwareDetails, setSoftwareDetails] = useState(order.softwareDetails ?? '')
+  const editSoftware = canChangeUnpaidQuote(order)
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
+    const softwareError = editSoftware && softwareSelectionError(software, softwareDetails)
+    if (softwareError) {
+      setProblem(softwareError)
+      return
+    }
     const form = new FormData(event.currentTarget)
     const deadline = String(form.get('deadline') ?? '')
     setBusy(true)
@@ -32,6 +43,8 @@ export function StaffOrderDetails({
           subject: String(form.get('subject') ?? ''),
           style: String(form.get('style') ?? ''),
           sources: Number(form.get('sources')),
+          language: language || null,
+          ...(editSoftware ? { software: selectedSoftware(software), softwareDetails } : {}),
           instructions: String(form.get('instructions') ?? ''),
           agreedDueAt: deadline ? new Date(`${deadline}Z`).toISOString() : null,
         },
@@ -66,6 +79,7 @@ export function StaffOrderDetails({
           />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
+          <OrderLanguageField id="staff-order-language" value={language} onChange={setLanguage} />
           <div className="space-y-2">
             <Label htmlFor="staff-subject">Subject</Label>
             <Input
@@ -108,6 +122,13 @@ export function StaffOrderDetails({
             />
           </div>
         </div>
+        <OrderSoftwareField
+          id="staff-order-software"
+          value={software}
+          onChange={setSoftware}
+          details={{ value: softwareDetails, onChange: setSoftwareDetails }}
+          disabled={!editSoftware}
+        />
         <div className="space-y-2">
           <Label htmlFor="staff-instructions">Instructions</Label>
           <Textarea

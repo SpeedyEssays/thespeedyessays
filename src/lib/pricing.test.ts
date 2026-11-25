@@ -24,6 +24,29 @@ describe("order estimates", () => {
     });
   });
 
+  it("charges the software fee once per order for pages, words or slides", () => {
+    for (const length of [
+      { pages: 40 },
+      { wordCount: 100 },
+      { slideCount: 600 },
+    ]) {
+      const standard = estimatePrice({
+        ...base,
+        ...length,
+        extras: { topWriter: true },
+      });
+      const technical = estimatePrice({
+        ...base,
+        ...length,
+        extras: { topWriter: true },
+        software: "spss",
+      });
+      expect(technical.softwareFee).toBe(4);
+      expect(technical.total).toBeCloseTo(standard.total + 4, 2);
+      expect(technical.extras).toBe(standard.extras);
+    }
+  });
+
   it.each([
     ["writing", 8],
     ["editing", 6],

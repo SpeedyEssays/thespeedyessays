@@ -5,7 +5,7 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { MessageSquare, Package, Shield, Users } from 'lucide-react'
+import { Bell, MessageSquare, Package, Shield, Star, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
@@ -17,6 +17,9 @@ import { StaffCustomerPresence } from '@/components/staff-customer-presence'
 import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
 import { StaffOrderEmail } from '@/components/staff-order-email'
+import { StaffFeedback } from '@/components/staff-feedback'
+import { StaffNotifications } from '@/components/staff-notifications'
+import { StaffOrderStatus } from '@/components/staff-order-status'
 import {
   getStaffInboxCounts,
   listSupportChats,
@@ -35,7 +38,7 @@ import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
   tab: z
-    .enum(['chat', 'orders', 'customers', 'admins'])
+    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins'])
     .optional()
     .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
@@ -47,6 +50,8 @@ const staffPages = [
   { key: 'chat', label: 'Website chat', Icon: MessageSquare },
   { key: 'orders', label: 'Orders', Icon: Package },
   { key: 'customers', label: 'Customers', Icon: Users },
+  { key: 'feedback', label: 'Feedback', Icon: Star },
+  { key: 'notifications', label: 'Notifications', Icon: Bell },
   { key: 'admins', label: 'Admins', Icon: Shield },
 ] as const
 
@@ -83,7 +88,7 @@ export const Route = createFileRoute('/admin')({
 })
 
 function Admin() {
-  const { tab = 'chat', customer, chat } = Route.useSearch()
+  const { tab = 'chat', customer, chat, order } = Route.useSearch()
   const orders = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
   useVisibleActivity(recordStaffActivity, Boolean(supportName))
@@ -133,6 +138,8 @@ function Admin() {
         <StaffCustomers selected={customer} unreadByCustomer={counts?.customers} online={online} />
       )}
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
+      {tab === 'feedback' && <StaffFeedback />}
+      {tab === 'notifications' && <StaffNotifications key={`${customer ?? ''}:${order ?? ''}`} customerId={customer} orderCode={order} />}
       {tab === 'orders' && (
         <StaffOrders
           orders={orders}
@@ -257,25 +264,35 @@ function StaffOrders({
                 </p>
                 <StaffCustomerPresence userId={order.clientId} />
               </div>
-              <Button size="sm" variant="outline" asChild>
-                <Link
-                  to="/admin"
-                  search={{ tab: 'customers', customer: order.clientId }}
-                >
-                  Customer profile
-                </Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/admin" search={{ tab: 'customers', customer: order.clientId }}>
+                    Customer profile
+                  </Link>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/admin" search={{ tab: 'notifications', customer: order.clientId, order: order.code }}>
+                    <Bell /> Send notification
+                  </Link>
+                </Button>
+              </div>
             </div>
-            {order.status !== 'cancelled' && (
-              <StaffOrderDetails
-                key={order.detailsRevision}
-                order={order}
-                onSaved={async () => {
-                  setNotice('Order details saved.')
-                  await router.invalidate()
-                }}
-              />
-            )}
+            <StaffOrderStatus
+              key={`${order.status}:${order.checkoutStarted}`}
+              order={order}
+              onSaved={async (message) => {
+                await router.invalidate()
+                setNotice(message)
+              }}
+            />
+            <StaffOrderDetails
+              key={order.detailsRevision}
+              order={order}
+              onSaved={async () => {
+                setNotice('Order details saved.')
+                await router.invalidate()
+              }}
+            />
             <StaffOrderEmail order={order} />
             <OrderPanel
               order={order}

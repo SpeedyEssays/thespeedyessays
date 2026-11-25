@@ -4,6 +4,8 @@ import { ArrowRight, Clock } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
+import { OrderSoftwareField } from '@/components/order-requirement-fields'
+import { selectedSoftware, type SoftwareSelection } from '@/lib/order-requirements'
 import {
   academicLevels, deadlines, estimatePrice, formatUSD, lengthForAssignment, maxOrderLength,
   parseOrderLength, PRESENTATION_TYPE, quoteLength,
@@ -19,8 +21,10 @@ export function PricingCalculator({ className }: { className?: string }) {
   const [type, setType] = useState<AssignmentType>('Essay')
   const [service, setService] = useState<OrderService>('writing')
   const [length, setLength] = useState<OrderLength>({ unit: 'pages', amount: '3' })
+  const [software, setSoftware] = useState<SoftwareSelection>('none')
   const validLength = parseOrderLength(length.amount, length.unit) !== undefined
-  const input = { level, service, ...quoteLength(length) }
+  const canContinue = validLength && software !== ''
+  const input = { level, service, software: selectedSoftware(software), ...quoteLength(length) }
   const quote = estimatePrice({ ...input, deadline })
   const relaxed = estimatePrice({ ...input, deadline: '14d' })
   const isSlideQuote = length.unit === 'slides'
@@ -91,6 +95,7 @@ export function PricingCalculator({ className }: { className?: string }) {
           allowSlides={type === PRESENTATION_TYPE}
           error={validLength ? undefined : `Enter 1 to ${maxOrderLength(length.unit).toLocaleString('en-US')} ${length.unit}.`}
         />
+        <OrderSoftwareField id="calc-software" value={software} onChange={setSoftware} />
       </div>
 
       <div className="mt-8 flex flex-col gap-4 rounded-xl bg-secondary p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -103,14 +108,20 @@ export function PricingCalculator({ className }: { className?: string }) {
             {formatUSD(isSlideQuote ? quote.perSlide : quote.perPage)} per {isSlideQuote ? 'slide' : 'page'}
             {validLength && quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
           </p>
+          {quote.softwareFee > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Includes {formatUSD(quote.softwareFee)} for software work
+            </p>
+          )}
         </div>
-        {validLength ? (
+        {canContinue ? (
           <Button size="lg" asChild>
             <Link to="/order" search={{
               level,
               deadline,
               type,
               service,
+              software: input.software ?? undefined,
               pages: length.unit === 'pages' ? quote.pages : undefined,
               words: input.wordCount,
               slides: input.slideCount,

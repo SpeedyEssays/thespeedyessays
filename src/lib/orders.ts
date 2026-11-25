@@ -2,6 +2,7 @@
 // server functions that persist orders.
 
 import type { OrderService } from './pricing'
+import type { OrderLanguage, OrderSoftware } from './order-requirements'
 
 export const orderStatuses = [
   'awaiting-payment',
@@ -16,6 +17,7 @@ export const orderStatuses = [
 ] as const
 
 export type OrderStatus = (typeof orderStatuses)[number]
+export const staffOrderStatuses = orderStatuses.filter((status) => status !== 'approved')
 
 export const statusMeta: Record<
   OrderStatus,
@@ -75,6 +77,13 @@ export function canCheckout(order: {
   return !order.paidAt && order.status !== 'cancelled'
 }
 
+export function canChangeUnpaidQuote(order: {
+  paidAt: Date | string | null
+  checkoutStarted: boolean
+}) {
+  return !order.paidAt && !order.checkoutStarted
+}
+
 export const MAX_ORDER_FILES_PER_UPLOAD = 8
 export const MAX_FILE_BYTES = 4 * 1024 * 1024
 export const REVISION_WINDOW_DAYS = 14
@@ -105,12 +114,23 @@ export type OrderFileView = {
   createdAt: string
 }
 
+export type OrderFeedbackView = {
+  rating: number
+  comment: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type OrderView = {
   id: number
   code: string
   title: string
   type: string
   service: OrderService
+  language: OrderLanguage | null
+  software: OrderSoftware | null
+  softwareDetails: string | null
+  softwareFeeCents: number
   subject: string
   level: string
   style: string
@@ -126,6 +146,8 @@ export type OrderView = {
   paymentMethod: string
   paidAt: string | null
   deliveredAt: string | null
+  approvedAt: string | null
+  feedback: OrderFeedbackView | null
   checkoutStarted: boolean
   status: OrderStatus
   originalityScore: number | null

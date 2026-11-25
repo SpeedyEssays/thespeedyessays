@@ -1,6 +1,8 @@
 // Pricing model shared by the homepage calculator and the order form.
 // The academic level, service and deadline determine the billable page rate.
 
+import { SOFTWARE_FEE_CENTS, type OrderSoftware } from './order-requirements'
+
 export const academicLevels = [
   { id: 'high-school', label: 'High School', rate: 5 },
   { id: 'undergraduate', label: 'Undergraduate', rate: 8 },
@@ -177,6 +179,7 @@ export function estimatePrice(input: {
   wordCount?: number
   slideCount?: number
   service?: OrderService
+  software?: OrderSoftware | null
   extras?: Extras
 }) {
   const level = academicLevels.find((l) => l.id === input.level) ?? academicLevels[1]
@@ -197,6 +200,7 @@ export function estimatePrice(input: {
   if (input.extras?.draftPreview) extras += extraPrices.draftPreview.flat
   if (input.extras?.abstractPage) extras += extraPrices.abstractPage.flat
   extras = round(extras)
+  const softwareFee = input.software ? SOFTWARE_FEE_CENTS / 100 : 0
 
   return {
     perPage,
@@ -205,7 +209,8 @@ export function estimatePrice(input: {
     slideCount,
     base,
     extras,
-    total: round(base + extras),
+    softwareFee,
+    total: round(base + extras + softwareFee),
     words: slideCount === undefined ? (wordCount ?? pages * WORDS_PER_PAGE) : 0,
   }
 }

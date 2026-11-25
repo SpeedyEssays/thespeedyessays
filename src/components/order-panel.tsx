@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
+import { OrderFeedbackForm } from '@/components/order-feedback-form'
 import { uploadOrderFile } from '@/lib/files.functions'
 import {
   approveOrder,
@@ -11,7 +12,6 @@ import {
   markOrderMessagesRead,
   requestRevision,
   sendOrderMessage,
-  updateOrderStatus,
 } from '@/lib/orders.functions'
 import {
   canCheckout,
@@ -29,6 +29,7 @@ import {
   type OrderView,
 } from '@/lib/orders'
 import { assignmentTypeLabel, formatOrderLength, formatUSD, orderServices } from '@/lib/pricing'
+import { orderLanguages, orderSoftware } from '@/lib/order-requirements'
 import { refreshPayment, startCheckout } from '@/lib/payments.functions'
 
 export function OrderPanel({
@@ -240,6 +241,13 @@ export function OrderPanel({
         {order.service !== 'writing' && (
           <p className="mt-1 text-sm">{orderServices[order.service].label}</p>
         )}
+        {order.language && <p className="mt-1 text-sm">Language · {orderLanguages[order.language]}</p>}
+        {order.software && (
+          <p className="mt-1 break-words text-sm">
+            Software · {order.softwareDetails || orderSoftware[order.software]}
+            {order.softwareFeeCents > 0 && ` (+${formatUSD(order.softwareFeeCents / 100)} USD)`}
+          </p>
+        )}
         <p className="mt-1 text-sm">
           {formatUSD(order.price)} USD ·{' '}
           {!staff &&
@@ -343,7 +351,7 @@ export function OrderPanel({
             onClick={() =>
               void run(
                 () => approveOrder({ data: { code: order.code } }),
-                'Order approved.',
+                'Order approved. You can leave feedback below.',
               )
             }
           >
@@ -351,51 +359,6 @@ export function OrderPanel({
           </Button>
         )}
       </section>
-      {staff && active && (
-        <div className="flex flex-wrap gap-2">
-          {(['in-progress', 'draft-ready', 'completed'] as const)
-            .filter((status) => status !== order.status)
-            .map((status) => (
-              <Button
-                key={status}
-                size="sm"
-                variant={status === 'completed' ? 'default' : 'outline'}
-                disabled={busy}
-                onClick={() =>
-                  void run(
-                    () =>
-                      updateOrderStatus({ data: { code: order.code, status } }),
-                    `Updated to ${statusMeta[status].label.toLowerCase()}.`,
-                  )
-                }
-              >
-                {status === 'completed'
-                  ? 'Mark as delivered'
-                  : `Mark ${statusMeta[status].label.toLowerCase()}`}
-              </Button>
-            ))}
-        </div>
-      )}
-      {staff &&
-        order.status === 'awaiting-payment' &&
-        !order.checkoutStarted && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void run(
-                () =>
-                  updateOrderStatus({
-                    data: { code: order.code, status: 'cancelled' },
-                  }),
-                'Order cancelled.',
-              )
-            }
-          >
-            Cancel unpaid order
-          </Button>
-        )}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
@@ -405,6 +368,9 @@ export function OrderPanel({
         <p role="status" className="text-sm">
           {notice}
         </p>
+      )}
+      {!staff && allowApproval && order.approvedAt && (
+        <OrderFeedbackForm code={order.code} feedback={order.feedback} />
       )}
       {!staff && revisionRequestStatuses.includes(order.status) && (
         <form

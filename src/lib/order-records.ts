@@ -3,13 +3,14 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db'
-import { orderFiles, orderMessages, orders } from '../../db/schema'
+import { orderFeedback, orderFiles, orderMessages, orders } from '../../db/schema'
 import {
   canCustomerReadFile,
   orderCode,
   orderIdFromCode,
   type AdminOrderView,
   type FileKind,
+  type OrderFeedbackView,
   type OrderStatus,
   type OrderView,
 } from './orders'
@@ -17,13 +18,31 @@ import {
 type OrderRow = typeof orders.$inferSelect
 type FileRow = typeof orderFiles.$inferSelect
 
-function toView(row: OrderRow, files: FileRow[], staff = false): OrderView {
+export function feedbackView(row: typeof orderFeedback.$inferSelect): OrderFeedbackView {
+  return {
+    rating: row.rating,
+    comment: row.comment,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }
+}
+
+function toView(
+  row: OrderRow,
+  files: FileRow[],
+  staff = false,
+  feedback: OrderFeedbackView | null = null,
+): OrderView {
   return {
     id: row.id,
     code: orderCode(row.id),
     title: row.topic,
     type: row.type,
     service: row.service,
+    language: row.language,
+    software: row.software,
+    softwareDetails: row.softwareDetails,
+    softwareFeeCents: row.softwareFeeCents,
     subject: row.subject,
     level: row.level,
     style: row.style,
@@ -40,6 +59,8 @@ function toView(row: OrderRow, files: FileRow[], staff = false): OrderView {
     checkoutStarted: !!row.paymentReference,
     paidAt: row.paidAt?.toISOString() ?? null,
     deliveredAt: row.deliveredAt?.toISOString() ?? null,
+    approvedAt: (row.approvedAt ?? (row.status === 'approved' ? row.updatedAt : null))?.toISOString() ?? null,
+    feedback,
     status: row.status as OrderStatus,
     originalityScore: row.originalityScore,
     instructions: row.instructions,
@@ -74,8 +95,14 @@ export async function listOrdersForUser(userId: string) {
     .from(orders)
     .where(eq(orders.userId, userId))
     .orderBy(desc(orders.createdAt))
-  const files = await filesFor(rows.map((r) => r.id))
-  return rows.map((r) => toView(r, files))
+  if (!rows.length) return []
+  const ids = rows.map((row) => row.id)
+  const [files, feedback] = await Promise.all([
+    filesFor(ids),
+    getDb().select().from(orderFeedback).where(inArray(orderFeedback.orderId, ids)),
+  ])
+  const byOrder = new Map(feedback.map((row) => [row.orderId, feedbackView(row)]))
+  return rows.map((row) => toView(row, files, false, byOrder.get(row.id)))
 }
 
 export async function listAllOrders(

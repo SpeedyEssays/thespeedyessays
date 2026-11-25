@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -11,6 +12,8 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import type { OrderService } from '../src/lib/pricing'
+import type { OrderLanguage, OrderSoftware } from '../src/lib/order-requirements'
+import type { NotificationKind } from '../src/lib/portal-notifications'
 
 // Orders placed by signed-in clients. Price is recomputed on the server from
 // src/lib/pricing.ts and stored in cents.
@@ -26,8 +29,13 @@ export const orders = pgTable(
     paymentUrl: text('payment_url'),
     paidAt: timestamp('paid_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
     type: text().notNull(),
     service: text().$type<OrderService>().notNull().default('writing'),
+    language: text().$type<OrderLanguage>(),
+    software: text().$type<OrderSoftware>(),
+    softwareDetails: text('software_details'),
+    softwareFeeCents: integer('software_fee_cents').notNull().default(0),
     subject: text().notNull(),
     topic: text().notNull(),
     level: text().notNull(),
@@ -60,7 +68,54 @@ export const orders = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index('orders_user_id_idx').on(t.userId)],
+  (t) => [
+    index('orders_user_id_idx').on(t.userId),
+    check('orders_software_fee_valid', sql`${t.softwareFeeCents} >= 0`),
+  ],
+)
+
+export const orderFeedback = pgTable.withRLS(
+  'order_feedback',
+  {
+    orderId: integer('order_id')
+      .primaryKey()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    rating: integer().notNull(),
+    comment: text().notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check('order_feedback_rating_valid', sql`${t.rating} between 1 and 5`),
+    index('order_feedback_updated_idx').on(t.updatedAt.desc(), t.orderId.desc()),
+  ],
+)
+
+export const customerNotifications = pgTable.withRLS(
+  'customer_notifications',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    kind: text().$type<NotificationKind>().notNull(),
+    title: text().notNull(),
+    body: text().notNull(),
+    senderName: text('sender_name'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (t) => [
+    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer')`),
+    index('customer_notifications_user_sent_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
+    index('customer_notifications_unread_idx').on(t.userId).where(sql`${t.readAt} is null`),
+    index('customer_notifications_order_idx').on(t.orderId),
+  ],
 )
 
 export const orderFiles = pgTable(

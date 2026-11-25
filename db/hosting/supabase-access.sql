@@ -10,10 +10,13 @@ alter table public.chat_conversations enable row level security;
 alter table public.chat_messages enable row level security;
 alter table public.customer_presence enable row level security;
 alter table public.staff_presence enable row level security;
+alter table public.order_feedback enable row level security;
+alter table public.customer_notifications enable row level security;
 
 revoke all on public.orders, public.order_files, public.order_messages,
   public.chat_conversations, public.chat_messages, public.customer_presence,
-  public.staff_presence from public, anon, authenticated;
+  public.staff_presence, public.order_feedback, public.customer_notifications
+  from public, anon, authenticated;
 
 revoke all on sequence public.orders_id_seq, public.order_files_id_seq,
   public.order_messages_id_seq, public.chat_messages_id_seq from public, anon, authenticated;

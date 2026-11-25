@@ -5,9 +5,11 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
+import { Bell, MessageSquare, Package, Plus } from 'lucide-react'
 import { PortalShell } from '@/components/portal-shell'
 import { UnreadBadge } from '@/components/chat-indicators'
 import { SupportChat } from '@/components/chat-widget'
+import { CustomerNotifications } from '@/components/customer-notifications'
 import { Button } from '@/components/ui/button'
 import { OrderPanel } from '@/components/order-panel'
 import { getMyDisplayName } from '@/lib/customers.functions'
@@ -44,8 +46,8 @@ const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { order?: string; reference?: string; tab?: 'chat' } => ({
-    tab: search.tab === 'chat' ? 'chat' : undefined,
+  ): { order?: string; reference?: string; tab?: 'chat' | 'notifications' } => ({
+    tab: search.tab === 'chat' || search.tab === 'notifications' ? search.tab : undefined,
     order: typeof search.order === 'string' ? search.order : undefined,
     reference:
       typeof search.reference === 'string' &&
@@ -123,18 +125,18 @@ function Dashboard() {
 
   return (
     <PortalShell>
-      <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
+      <header className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-card p-5 sm:p-6">
         <div>
-          <h1 className="text-4xl font-semibold">Customer portal</h1>
+          <h1 className="text-3xl font-semibold sm:text-4xl">Customer portal</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <p className="break-all text-sm text-muted-foreground">
               {displayName || user.name || user.email}
             </p>
-            <UnreadBadge count={(counts?.website ?? 0) + (counts?.ordersTotal ?? 0)} />
+            <UnreadBadge count={(counts?.website ?? 0) + (counts?.ordersTotal ?? 0) + (counts?.notifications ?? 0)} />
           </div>
         </div>
         <Button asChild>
-          <Link to="/order">New order</Link>
+          <Link to="/order"><Plus /> New order</Link>
         </Button>
       </header>
       <nav
@@ -147,7 +149,7 @@ function Dashboard() {
             search={{ order }}
             aria-current={tab ? undefined : 'page'}
           >
-            My orders <UnreadBadge count={counts?.ordersTotal} />
+            <Package /> My orders <UnreadBadge count={counts?.ordersTotal} />
           </Link>
         </Button>
         <Button variant={tab === 'chat' ? 'default' : 'ghost'} asChild>
@@ -156,11 +158,22 @@ function Dashboard() {
             search={{ tab: 'chat', order }}
             aria-current={tab === 'chat' ? 'page' : undefined}
           >
-            Live chat <UnreadBadge count={counts?.website} />
+            <MessageSquare /> Live chat <UnreadBadge count={counts?.website} />
+          </Link>
+        </Button>
+        <Button variant={tab === 'notifications' ? 'default' : 'ghost'} asChild>
+          <Link
+            to="/dashboard"
+            search={{ tab: 'notifications', order }}
+            aria-current={tab === 'notifications' ? 'page' : undefined}
+          >
+            <Bell /> Notifications &amp; offers <UnreadBadge count={counts?.notifications} />
           </Link>
         </Button>
       </nav>
-      {tab === 'chat' ? (
+      {tab === 'notifications' ? (
+        <CustomerNotifications unread={counts?.notifications ?? 0} onRead={refreshUnread} />
+      ) : tab === 'chat' ? (
         <section
           className="max-w-2xl rounded-xl border bg-card p-5 sm:p-6"
           aria-label="Live chat"

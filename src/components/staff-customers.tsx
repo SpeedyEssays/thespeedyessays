@@ -231,6 +231,11 @@ function CustomerDetails({
                 View orders
               </Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link to="/admin" search={{ tab: 'notifications', customer: id }}>
+                Send notification
+              </Link>
+            </Button>
             <Button
               disabled={busy}
               onClick={() =>

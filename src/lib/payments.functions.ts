@@ -46,6 +46,7 @@ export const startCheckout = createServerFn({ method: 'POST' })
         .where(
           and(
             eq(orders.id, order.id),
+            eq(orders.priceCents, order.priceCents),
             ne(orders.status, 'cancelled'),
             isNull(orders.paidAt),
             isNull(orders.paymentReference),

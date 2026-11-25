@@ -1,9 +1,9 @@
 import { createServerFn } from '@tanstack/react-start'
-import { and, desc, eq, exists, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, exists, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { getDb } from '../../db'
-import { orderFiles, orderMessages, orders } from '../../db/schema'
+import { customerNotifications, orderFiles, orderMessages, orders } from '../../db/schema'
 import { readCustomerProfile } from './customers.server'
 import { requireAdmin, requireUser } from './identity.functions'
 import {
@@ -12,9 +12,19 @@ import {
   listOrdersForUser,
 } from './order-records'
 import {
+  MAX_SOFTWARE_DETAILS,
+  orderLanguageIds,
+  orderSoftwareIds,
+  SOFTWARE_FEE_CENTS,
+} from './order-requirements'
+import {
+  canChangeUnpaidQuote,
   orderCode,
+  orderStatuses,
   REVISION_WINDOW_DAYS,
   revisionRequestStatuses,
+  staffOrderStatuses,
+  statusMeta,
   type OrderMessageView,
 } from './orders'
 import {
@@ -37,6 +47,9 @@ const deadlineIds = deadlines.map((d) => d.id) as [string, ...string[]]
 const createOrderInput = z.object({
   type: z.enum(assignmentTypes),
   service: z.enum(orderServiceIds).default('writing'),
+  language: z.enum(orderLanguageIds).default('en-US'),
+  software: z.enum(orderSoftwareIds).nullable().optional(),
+  softwareDetails: z.string().trim().max(MAX_SOFTWARE_DETAILS).optional(),
   subject: z.string().trim().min(1).max(80),
   topic: z.string().trim().min(4).max(300),
   level: z.enum(levelIds),
@@ -60,6 +73,9 @@ const createOrderInput = z.object({
     ? pages >= 1
     : type === PRESENTATION_TYPE && pages === 0 && wordCount === undefined,
   { message: 'Choose a valid page, word or slide count for this assignment.' },
+).refine(
+  ({ software, softwareDetails }) => software !== 'other' || Boolean(softwareDetails),
+  { message: 'Enter the software you need.', path: ['softwareDetails'] },
 )
 
 export const createOrder = createServerFn({ method: 'POST' })
@@ -81,6 +97,7 @@ export const createOrder = createServerFn({ method: 'POST' })
       wordCount: data.wordCount,
       slideCount: data.slideCount,
       service: data.service,
+      software: data.software,
       extras: data.extras,
     })
 
@@ -94,6 +111,10 @@ export const createOrder = createServerFn({ method: 'POST' })
         clientName: profile.displayName ?? context.user.name,
         type: data.type,
         service: data.service,
+        language: data.language,
+        software: data.software,
+        softwareDetails: data.software === 'other' ? data.softwareDetails : null,
+        softwareFeeCents: Math.round(quote.softwareFee * 100),
         subject: data.subject,
         topic: data.topic,
         level: level.label,
@@ -147,73 +168,68 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
   .validator(
     z.object({
       code: z.string().max(20),
-      status: z.enum(['in-progress', 'draft-ready', 'completed', 'cancelled']),
+      status: z.enum(staffOrderStatuses),
+      currentStatus: z.enum(orderStatuses),
     }),
   )
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
-    if (data.status === 'cancelled') {
-      if (order.status !== 'awaiting-payment' || order.paymentReference) {
-        throw new Error(
-          'This order cannot be cancelled here because checkout has already started or the order was paid.',
-        )
-      }
-    } else {
-      if (
-        ![
-          'awaiting-payment',
-          'paid',
-          'writer-assigned',
-          'in-progress',
-          'draft-ready',
-          'revision',
-        ].includes(order.status)
-      ) {
-        throw new Error('This order is not ready for a fulfilment update.')
-      }
-      if (data.status === 'completed' || data.status === 'draft-ready') {
-        const [paper] = await getDb()
-          .select({ id: orderFiles.id })
-          .from(orderFiles)
-          .where(
-            and(
-              eq(orderFiles.orderId, order.id),
-              eq(
-                orderFiles.kind,
-                data.status === 'completed' ? 'final' : 'paper',
-              ),
-            ),
-          )
-          .limit(1)
-        if (!paper)
-          throw new Error(
-            data.status === 'completed'
-              ? 'Upload a final copy before marking this order delivered.'
-              : 'Upload a draft before marking this order draft ready.',
-          )
-      }
-    }
-    const now = new Date()
-    const [updated] = await getDb()
-      .update(orders)
-      .set({
-        status: data.status,
-        updatedAt: now,
-        deliveredAt: data.status === 'completed' ? now : order.deliveredAt,
-      })
-      .where(
-        and(
-          eq(orders.id, order.id),
-          eq(orders.status, order.status),
-          ...(data.status === 'cancelled'
-            ? [isNull(orders.paymentReference)]
-            : []),
-        ),
-      )
-      .returning({ id: orders.id })
-    if (!updated)
+    const { status } = data
+    if (status === order.status) return { ok: true }
+    if (order.status !== data.currentStatus)
       throw new Error('The order was updated elsewhere. Refresh and try again.')
+    if (status === 'cancelled' && !canChangeUnpaidQuote({
+      paidAt: order.paidAt,
+      checkoutStarted: Boolean(order.paymentReference),
+    })) {
+      throw new Error('Only unpaid orders with no checkout in progress can be cancelled here.')
+    }
+    if ((status === 'paid' && !order.paidAt) || (status === 'awaiting-payment' && order.paidAt))
+      throw new Error('Choose a status that matches the recorded payment.')
+
+    const fileKind = status === 'completed' ? 'final' : status === 'draft-ready' ? 'paper' : null
+    const now = new Date()
+    await getDb().transaction(async (tx) => {
+      const file = fileKind && tx.select({ id: orderFiles.id }).from(orderFiles).where(
+        and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, fileKind)),
+      )
+      const [updated] = await tx.update(orders)
+        .set({
+          status,
+          updatedAt: now,
+          ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
+          ...(status === 'completed' ? { deliveredAt: now } : {}),
+        })
+        .where(and(
+          eq(orders.id, order.id),
+          eq(orders.status, data.currentStatus),
+          status === 'paid' ? isNotNull(orders.paidAt) : undefined,
+          status === 'cancelled' || status === 'awaiting-payment' ? isNull(orders.paidAt) : undefined,
+          status === 'cancelled' ? isNull(orders.paymentReference) : undefined,
+          file ? exists(file) : undefined,
+        ))
+        .returning({ id: orders.id })
+      if (!updated) {
+        if (file && !(await file.limit(1)).length)
+          throw new Error(fileKind === 'final'
+            ? 'Upload a final copy before marking this order delivered.'
+            : 'Upload a draft before marking this order draft ready.')
+        throw new Error('The order was updated elsewhere. Refresh and try again.')
+      }
+      const reopened = order.status === 'cancelled'
+      const code = orderCode(order.id)
+      await tx.insert(customerNotifications).values({
+        userId: order.userId,
+        orderId: order.id,
+        kind: 'notice',
+        title: reopened ? `Order ${code} reopened` : `Order ${code} · ${statusMeta[status].label}`,
+        body: status === 'completed'
+          ? 'Your final copy is ready. Open your order to download and review it.'
+          : `The status of your order is now ${statusMeta[status].label.toLowerCase()}.`,
+        senderName: context.user.supportName,
+      })
+    })
     return { ok: true }
   })
 
@@ -224,6 +240,9 @@ const orderDetailsInput = z.object({
   subject: z.string().trim().min(1).max(80),
   style: z.string().trim().min(1).max(80),
   sources: z.number().int().min(0).max(100),
+  language: z.enum(orderLanguageIds).nullable().optional(),
+  software: z.enum(orderSoftwareIds).nullable().optional(),
+  softwareDetails: z.string().trim().max(MAX_SOFTWARE_DETAILS).optional(),
   instructions: z.string().trim().max(20000),
   agreedDueAt: z.iso.datetime().nullable(),
 })
@@ -232,10 +251,26 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
   .middleware([requireAdmin])
   .validator(orderDetailsInput)
   .handler(async ({ data, context }) => {
-    const { code, revision, agreedDueAt, ...details } = data
+    const { code, revision, agreedDueAt, language, software, softwareDetails, ...details } = data
     const order = await findAccessibleOrder(code, context.user)
-    if (!order || order.status === 'cancelled')
-      throw new Error('This order is unavailable.')
+    if (!order) throw new Error('This order is unavailable.')
+    if (order.detailsRevision !== revision)
+      throw new Error('This order changed. Refresh it and try again.')
+    const nextLanguage = language === undefined ? order.language : language
+    const nextSoftware = software === undefined ? order.software : software
+    const nextSoftwareDetails = nextSoftware === 'other'
+      ? softwareDetails ?? order.softwareDetails
+      : null
+    if (nextSoftware === 'other' && !nextSoftwareDetails)
+      throw new Error('Enter the software needed for this order.')
+    const softwareChanged = nextSoftware !== order.software || nextSoftwareDetails !== order.softwareDetails
+    if (softwareChanged && !canChangeUnpaidQuote({
+      paidAt: order.paidAt,
+      checkoutStarted: Boolean(order.paymentReference),
+    })) throw new Error('The software selection is locked once checkout starts.')
+    const softwareFeeCents = nextSoftware
+      ? order.software ? order.softwareFeeCents : SOFTWARE_FEE_CENTS
+      : 0
     const deadline = agreedDueAt ? new Date(agreedDueAt) : null
     if (deadline && !Number.isFinite(deadline.getTime()))
       throw new Error('Choose a valid deadline.')
@@ -245,11 +280,11 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
       details.style !== order.style && 'citation style',
       details.sources !== order.sources && 'source count',
       details.instructions !== order.instructions && 'instructions',
+      nextLanguage !== order.language && 'language',
+      softwareChanged && 'software requirements',
       deadline?.toISOString() !== order.agreedDueAt?.toISOString() &&
         'agreed deadline',
     ].filter(Boolean)
-    if (order.detailsRevision !== revision)
-      throw new Error('This order changed. Refresh it and try again.')
     if (!changed.length) return { ok: true }
 
     await getDb().transaction(async (tx) => {
@@ -257,6 +292,13 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
         .update(orders)
         .set({
           ...details,
+          language: nextLanguage,
+          ...(softwareChanged ? {
+            software: nextSoftware,
+            softwareDetails: nextSoftwareDetails,
+            softwareFeeCents,
+            priceCents: order.priceCents - order.softwareFeeCents + softwareFeeCents,
+          } : {}),
           agreedDueAt: deadline,
           detailsRevision: sql`${orders.detailsRevision} + 1`,
           updatedAt: new Date(),
@@ -265,7 +307,8 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
           and(
             eq(orders.id, order.id),
             eq(orders.detailsRevision, revision),
-            ne(orders.status, 'cancelled'),
+            softwareChanged ? isNull(orders.paidAt) : undefined,
+            softwareChanged ? isNull(orders.paymentReference) : undefined,
           ),
         )
         .returning({ id: orders.id })
@@ -389,7 +432,11 @@ export const approveOrder = createServerFn({ method: 'POST' })
       )
     const [approved] = await db
       .update(orders)
-      .set({ status: 'approved', updatedAt: new Date() })
+      .set({
+        status: 'approved',
+        approvedAt: sql`coalesce(${orders.approvedAt}, now())`,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(orders.id, order.id),
@@ -435,7 +482,11 @@ export const requestRevision = createServerFn({ method: 'POST' })
     await getDb().transaction(async (tx) => {
       const [updated] = await tx
         .update(orders)
-        .set({ status: 'revision', updatedAt: new Date() })
+        .set({
+          status: 'revision',
+          updatedAt: new Date(),
+          ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
+        })
         .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
         .returning({ id: orders.id })
       if (!updated)

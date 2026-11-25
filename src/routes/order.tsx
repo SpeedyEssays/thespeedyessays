@@ -12,11 +12,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { PortalShell } from '@/components/portal-shell'
 import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
+import { OrderLanguageField, OrderSoftwareField } from '@/components/order-requirement-fields'
 import { getServerUser } from '@/lib/identity.functions'
 import { uploadOrderFile } from '@/lib/files.functions'
 import { createOrder } from '@/lib/orders.functions'
 import { isCheckoutAvailable } from '@/lib/payments.functions'
 import { checkOrderFile, MAX_ORDER_FILES_PER_UPLOAD, orderFileAccept } from '@/lib/orders'
+import {
+  orderLanguages,
+  orderSoftware,
+  orderSoftwareIds,
+  selectedSoftware,
+  softwareSelectionError,
+  type OrderLanguage,
+  type OrderSoftware,
+  type SoftwareSelection,
+} from '@/lib/order-requirements'
 import {
   academicLevels,
   assignmentTypes,
@@ -52,6 +63,7 @@ type OrderSearch = {
   pages?: number
   words?: number
   slides?: number
+  software?: OrderSoftware
 }
 
 export const Route = createFileRoute('/order')({
@@ -60,6 +72,7 @@ export const Route = createFileRoute('/order')({
     deadline: deadlines.some((d) => d.id === search.deadline) ? (search.deadline as DeadlineId) : undefined,
     type: assignmentTypes.find((type) => type === search.type),
     service: orderServiceIds.find((service) => service === search.service),
+    software: orderSoftwareIds.find((software) => software === search.software),
     pages: parseOrderLength(search.pages, 'pages'),
     words: parseOrderLength(search.words, 'words'),
     slides: search.type === PRESENTATION_TYPE
@@ -84,6 +97,9 @@ const steps = ['Assignment', 'Length & deadline', 'Instructions', 'Review'] as c
 type FormState = {
   type: AssignmentType
   service: OrderService
+  language: OrderLanguage
+  software: SoftwareSelection
+  softwareDetails: string
   subject: string
   topic: string
   level: AcademicLevelId
@@ -110,6 +126,9 @@ function OrderPage() {
   const [form, setForm] = useState<FormState>({
     type: search.type ?? 'Essay',
     service: search.service ?? 'writing',
+    language: 'en-US',
+    software: search.software ?? 'none',
+    softwareDetails: '',
     subject: '',
     topic: '',
     level: search.level ?? 'undergraduate',
@@ -129,7 +148,8 @@ function OrderPage() {
     agree: false,
   })
   const length = quoteLength(form.length)
-  const quote = estimatePrice({ ...form, ...length })
+  const software = selectedSoftware(form.software)
+  const quote = estimatePrice({ ...form, ...length, software })
   const unitPrice = quote.slideCount === undefined ? quote.perPage : quote.perSlide
   const validLength = parseOrderLength(form.length.amount, form.length.unit) !== undefined
 
@@ -152,6 +172,8 @@ function OrderPage() {
     if (s === 0) {
       if (!form.subject) e.subject = 'Choose a subject'
       if (form.topic.trim().length < 4) e.topic = 'Add a topic or working title'
+      const softwareError = softwareSelectionError(form.software, form.softwareDetails)
+      if (softwareError) e.software = softwareError
     }
     if (s === 1 && !validLength)
       e.length = `Enter 1 to ${maxOrderLength(form.length.unit).toLocaleString('en-US')} ${form.length.unit}.`
@@ -187,6 +209,9 @@ function OrderPage() {
       const { code } = await createOrder({ data: {
         type: form.type,
         service: form.service,
+        language: form.language,
+        software,
+        softwareDetails: software === 'other' ? form.softwareDetails : undefined,
         style: form.style as (typeof formattingStyles)[number],
         topic: form.topic,
         subject: form.subject,
@@ -296,6 +321,11 @@ function OrderPage() {
             <div className="grid gap-5 sm:grid-cols-2">
               <OrderServiceField id="service" value={form.service} onChange={(service) => set('service', service)} />
               <PaperTypeField id="type" value={form.type} onChange={selectAssignment} />
+              <OrderLanguageField
+                id="order-language"
+                value={form.language}
+                onChange={(language) => { if (language) set('language', language) }}
+              />
               <Field label="Subject" id="subject" error={errors.subject}>
                 <Select value={form.subject} onValueChange={(v) => set('subject', v)}>
                   <SelectTrigger id="subject" className="w-full" aria-invalid={!!errors.subject}>
@@ -354,6 +384,18 @@ function OrderPage() {
               <Field label="Number of sources" id="sources">
                 <Input id="sources" type="number" min={0} max={100} value={form.sources} onChange={(e) => set('sources', e.target.value)} />
               </Field>
+              <div className="sm:col-span-2">
+                <OrderSoftwareField
+                  id="order-software"
+                  value={form.software}
+                  onChange={(value) => set('software', value)}
+                  details={{ value: form.softwareDetails, onChange: (value) => {
+                    set('softwareDetails', value)
+                    setErrors((previous) => ({ ...previous, software: '' }))
+                  } }}
+                  error={errors.software}
+                />
+              </div>
             </div>
           )}
 
@@ -375,7 +417,7 @@ function OrderPage() {
                   className="grid grid-cols-2 gap-2 sm:grid-cols-3"
                 >
                   {deadlines.map((d) => {
-                    const price = estimatePrice({ ...form, ...length, deadline: d.id, extras: {} }).base
+                    const price = estimatePrice({ ...form, ...length, software, deadline: d.id, extras: {} }).total
                     return (
                       <Label
                         key={d.id}
@@ -492,6 +534,8 @@ function OrderPage() {
                 <Summary label="Service" value={orderServices[form.service].label} />
                 <Summary label="Topic" value={form.topic} />
                 <Summary label="Level" value={academicLevels.find((l) => l.id === form.level)?.label} />
+                <Summary label="Language" value={orderLanguages[form.language]} />
+                <Summary label="Software" value={software === 'other' ? form.softwareDetails.trim() : software ? orderSoftware[software] : 'None required'} />
                 <Summary label="Style" value={`${form.style} · ${form.sources} sources`} />
                 <Summary label="Length" value={formatOrderLength(quote.pages, length.wordCount, quote.slideCount)} />
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
@@ -546,6 +590,7 @@ function OrderPage() {
                 />
               )}
               {quote.extras > 0 && <Row label="Extras" value={formatUSD(quote.extras)} />}
+              {quote.softwareFee > 0 && <Row label="Software work" value={formatUSD(quote.softwareFee)} />}
               <Row label="Originality report" value="Free" />
               <Row label="Title page & bibliography" value="Free" />
               <Row label="Revisions (14 days)" value="Free" />

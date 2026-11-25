@@ -8,6 +8,7 @@ import {
   chatConversations,
   chatMessages,
   customerPresence,
+  customerNotifications,
   customerProfiles,
   orderMessages,
   orders,
@@ -333,7 +334,7 @@ export const getCustomerInboxCounts = createServerFn({ method: 'GET' })
   .middleware([requireUser])
   .handler(async ({ context }) => {
     const conversation = await visitorConversation(context.user.id)
-    const [website, orders] = await Promise.all([
+    const [website, orders, notifications] = await Promise.all([
       conversation
         ? getDb()
             .select({ unread: count() })
@@ -347,8 +348,12 @@ export const getCustomerInboxCounts = createServerFn({ method: 'GET' })
             ))
         : [],
       unreadOrders(context.user.id),
+      getDb().select({ unread: count() }).from(customerNotifications).where(and(
+        eq(customerNotifications.userId, context.user.id),
+        isNull(customerNotifications.readAt),
+      )),
     ])
-    return inboxCounts(website[0]?.unread ?? 0, orders)
+    return { ...inboxCounts(website[0]?.unread ?? 0, orders), notifications: notifications[0]?.unread ?? 0 }
   })
 
 export const getStaffInboxCounts = createServerFn({ method: 'GET' })
