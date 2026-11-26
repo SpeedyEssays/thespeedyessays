@@ -8,8 +8,10 @@ import {
 import { Bell, CreditCard, Gift, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
 import { ChatThread } from '@/components/chat-thread'
+import { OrderDeadline } from '@/components/order-deadline'
 import { OrderPanel } from '@/components/order-panel'
 import { PortalShell } from '@/components/portal-shell'
 import { StaffAdmins } from '@/components/staff-admins'
@@ -34,13 +36,16 @@ import {
 } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listDiscountCodes } from '@/lib/discount-codes.functions'
-import { canCheckout, statusMeta, type AdminOrderView } from '@/lib/orders'
+import { hasOpenDeadline, isDeadlinePast } from '@/lib/order-deadline'
+import { canCheckout, orderStatuses, statusMeta, type AdminOrderView, type OrderStatus } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
+import { formatUSD } from '@/lib/pricing'
 import { getMyStaffAvatar } from '@/lib/staff-avatar.functions'
 import { recordStaffActivity } from '@/lib/staff-presence.functions'
 import { supportNameRequired } from '@/lib/support-name'
 import { useVisibleActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
+import { useOrderClock } from '@/lib/use-order-clock'
 import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
@@ -183,16 +188,28 @@ function StaffOrders({
   const { order: selected } = Route.useSearch()
   const { supportName } = Route.useRouteContext()
   const router = useRouter()
+  const now = useOrderClock()
   const [notice, setNotice] = useState('')
   const [error, setError] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<OrderStatus | 'all' | 'overdue'>('all')
   const needle = query.trim().toLowerCase()
-  const matching = orders.filter((order) =>
-    [order.code, order.title, order.clientName, order.clientEmail].some(
+  const matching = orders.filter((order) => {
+    if (filter === 'overdue') {
+      if (
+        now === null ||
+        !hasOpenDeadline(order.status) ||
+        !isDeadlinePast(order.dueAt, now)
+      )
+        return false
+    } else if (filter !== 'all' && order.status !== filter) {
+      return false
+    }
+    return [order.code, order.title, order.clientName, order.clientEmail].some(
       (value) => value?.toLowerCase().includes(needle),
-    ),
-  )
+    )
+  })
   const order = matching.find((item) => item.code === selected) ?? matching[0]
 
   async function refresh() {
@@ -209,8 +226,8 @@ function StaffOrders({
   }
 
   return (
-    <section aria-label="Customer orders">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+    <section aria-label="Customer orders" className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
         <input
           aria-label="Search orders"
           type="search"
@@ -219,6 +236,20 @@ function StaffOrders({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        <select
+          aria-label="Filter orders by status"
+          className="h-9 rounded-md border bg-card px-3 text-sm"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value as typeof filter)}
+        >
+          <option value="all">All statuses</option>
+          <option value="overdue">Overdue</option>
+          {orderStatuses.map((status) => (
+            <option key={status} value={status}>
+              {statusMeta[status].label}
+            </option>
+          ))}
+        </select>
         <Button
           size="sm"
           variant="outline"
@@ -246,87 +277,200 @@ function StaffOrders({
         )}
       </div>
       {order ? (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-          <nav className="space-y-2" aria-label="Order list">
-            {matching.map((item) => (
-              <Link
-                to="/admin"
-                search={{ tab: 'orders', customer, order: item.code }}
-                key={item.code}
-                aria-current={item.code === order.code ? 'true' : undefined}
-                className={cn(
-                  'block rounded-lg border p-3 text-sm',
-                  item.code === order.code
-                    ? 'border-primary bg-secondary'
-                    : 'bg-card',
-                )}
-              >
-                <span className="flex flex-wrap items-center gap-2 font-semibold">
-                  <span>{item.code} · {statusMeta[item.status]?.label ?? item.status}</span>
-                  <UnreadBadge count={unreadByOrder?.[item.code]} />
-                </span>
-                <span className="block break-words">{item.title}</span>
-                <span className="block break-all text-xs text-muted-foreground">
-                  {item.clientEmail}
-                  {item.awaitingReply ? ' · Awaiting reply' : ''}
-                </span>
-              </Link>
-            ))}
-          </nav>
-          <div className="min-w-0 space-y-3" key={order.code}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
+        <>
+          <Table
+            className="min-w-[47rem] border-separate border-spacing-0 text-left"
+            containerProps={{
+              className: 'max-h-96 overflow-auto rounded-xl border bg-card',
+              role: 'region',
+              'aria-label': 'Order list',
+              tabIndex: 0,
+            }}
+          >
+            <TableCaption className="sr-only">Customer orders</TableCaption>
+            <TableHeader className="sticky top-0 z-10 bg-secondary text-xs">
+              <TableRow className="hover:bg-secondary">
+                {[
+                  'Order',
+                  'Customer',
+                  'Status',
+                  'Deadline',
+                  'Total (USD)',
+                  'Messages',
+                ].map((label) => (
+                  <TableHead
+                    key={label}
+                    scope="col"
+                    className="border-b px-3 font-semibold"
+                  >
+                    {label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {matching.map((item) => (
+                <TableRow
+                  key={item.code}
+                  className={cn(
+                    '[&>td]:border-b [&>th]:border-b',
+                    item.code === order.code
+                      ? 'bg-secondary/65'
+                      : 'hover:bg-secondary/35',
+                  )}
+                >
+                  <th
+                    scope="row"
+                    className="w-1/4 px-3 py-2.5 align-top font-normal"
+                  >
+                    <Link
+                      to="/admin"
+                      search={{ tab: 'orders', customer, order: item.code }}
+                      hash="staff-order-detail"
+                      aria-current={
+                        item.code === order.code ? 'true' : undefined
+                      }
+                      className="block rounded-sm text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    >
+                      <span className="font-semibold">{item.code}</span>
+                      <span className="block break-words text-xs text-muted-foreground">
+                        {item.title}
+                      </span>
+                    </Link>
+                  </th>
+                  <TableCell className="w-1/5 px-3 py-2.5 align-top whitespace-normal">
+                    {item.clientName && (
+                      <span className="block break-words font-medium">
+                        {item.clientName}
+                      </span>
+                    )}
+                    <span className="block break-all text-xs text-muted-foreground">
+                      {item.clientEmail}
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-3 py-2.5 align-top whitespace-normal">
+                    <span className="inline-block rounded-md border bg-card px-2 py-0.5 text-xs font-medium">
+                      {statusMeta[item.status]?.label ?? item.status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="min-w-40 px-3 py-2.5 align-top text-xs whitespace-normal">
+                    <OrderDeadline order={item} now={now} />
+                  </TableCell>
+                  <TableCell className="px-3 py-2.5 align-top font-medium tabular-nums">
+                    {formatUSD(item.price)}
+                  </TableCell>
+                  <TableCell className="px-3 py-2.5 align-top text-xs">
+                    <UnreadBadge count={unreadByOrder?.[item.code]} />
+                    {item.awaitingReply && (
+                      <span className="block font-medium">Awaiting reply</span>
+                    )}
+                    {!unreadByOrder?.[item.code] && !item.awaitingReply && (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <section
+            id="staff-order-detail"
+            aria-label={`Selected order ${order.code}`}
+            className="scroll-mt-4 space-y-3"
+            key={order.code}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
               <div>
+                {order.clientName && (
+                  <p className="break-words text-sm font-semibold">
+                    {order.clientName}
+                  </p>
+                )}
                 <p className="break-all text-sm text-muted-foreground">
                   {order.clientEmail}
                 </p>
                 <StaffCustomerPresence userId={order.clientId} />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="xl:hidden"
+                  asChild
+                >
+                  <a href="#staff-order-actions">Order actions</a>
+                </Button>
                 <Button size="sm" variant="outline" asChild>
-                  <Link to="/admin" search={{ tab: 'customers', customer: order.clientId }}>
+                  <Link
+                    to="/admin"
+                    search={{ tab: 'customers', customer: order.clientId }}
+                  >
                     Customer profile
                   </Link>
                 </Button>
                 <Button size="sm" variant="outline" asChild>
-                  <Link to="/admin" search={{ tab: 'notifications', customer: order.clientId, order: order.code }}>
+                  <Link
+                    to="/admin"
+                    search={{
+                      tab: 'notifications',
+                      customer: order.clientId,
+                      order: order.code,
+                    }}
+                  >
                     <Bell /> Send notification
                   </Link>
                 </Button>
               </div>
             </div>
-            {canCheckout(order) && <StaffPaymentReminder code={order.code} />}
-            <StaffOrderPrice order={order} onSaved={async (message) => {
-              await router.invalidate()
-              setNotice(message)
-            }} />
-            <StaffOrderStatus
-              key={`${order.status}:${order.checkoutStarted}`}
-              order={order}
-              onSaved={async (message) => {
-                await router.invalidate()
-                setNotice(message)
-              }}
-            />
-            <StaffOrderDetails
-              key={order.detailsRevision}
-              order={order}
-              onSaved={async () => {
-                setNotice('Order details saved.')
-                await router.invalidate()
-              }}
-            />
-            <StaffOrderEmail order={order} />
-            <OrderPanel
-              order={order}
-              staff
-              replyNotice={supportName ? undefined : supportNameRequired}
-              onRead={onRead}
-            />
-          </div>
-        </div>
+            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+              <OrderPanel
+                order={order}
+                now={now}
+                staff
+                replyNotice={supportName ? undefined : supportNameRequired}
+                onRead={onRead}
+              />
+              <aside
+                id="staff-order-actions"
+                aria-label="Order actions"
+                className="min-w-0 scroll-mt-4 space-y-3"
+              >
+                <StaffOrderStatus
+                  key={`${order.status}:${order.checkoutStarted}`}
+                  order={order}
+                  now={now}
+                  onSaved={async (message) => {
+                    await router.invalidate()
+                    setNotice(message)
+                  }}
+                />
+                <StaffOrderDetails
+                  key={order.detailsRevision}
+                  order={order}
+                  onSaved={async () => {
+                    setNotice('Order details saved.')
+                    await router.invalidate()
+                  }}
+                />
+                {canCheckout(order) && (
+                  <StaffPaymentReminder code={order.code} />
+                )}
+                <StaffOrderPrice
+                  order={order}
+                  onSaved={async (message) => {
+                    await router.invalidate()
+                    setNotice(message)
+                  }}
+                />
+                <StaffOrderEmail order={order} />
+              </aside>
+            </div>
+          </section>
+        </>
       ) : (
         <p className="rounded-xl border bg-card p-6">
-          {needle ? 'No matching orders.' : 'No orders yet.'}
+          {needle || filter !== 'all'
+            ? 'No matching orders.'
+            : 'No orders yet.'}
         </p>
       )}
     </section>

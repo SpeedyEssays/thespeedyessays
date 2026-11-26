@@ -8,6 +8,14 @@ import { readCustomerProfile } from './customers.server'
 import { discountCodeInput, inactiveDiscountMessage, minimumDiscountMessage } from './discount-codes'
 import { requireAdmin, requireUser } from './identity.functions'
 import {
+  deadlineInHours,
+  formatDeadlineDistance,
+  isDeadlinePast,
+  MAX_DEADLINE_EXTENSION_HOURS,
+  newDeadlineRequired,
+  staffDeadlineRequired,
+} from './order-deadline'
+import {
   findAccessibleOrder,
   listAllOrders,
   listOrdersForUser,
@@ -50,6 +58,7 @@ import { supportNameRequired } from './support-name'
 
 const levelIds = academicLevels.map((l) => l.id) as [string, ...string[]]
 const deadlineIds = deadlines.map((d) => d.id) as [string, ...string[]]
+const deadlineHoursInput = z.number().int().min(1).max(MAX_DEADLINE_EXTENSION_HOURS).optional()
 
 const createOrderInput = z.object({
   type: z.enum(assignmentTypes),
@@ -126,6 +135,7 @@ export const createOrder = createServerFn({ method: 'POST' })
       }
       const priceCents = discount ? discountedTotalCents(originalCents, discount.percent) : originalCents
       if (discount && priceCents < MIN_CHECKOUT_CENTS) throw new Error(minimumDiscountMessage)
+      const placedAt = new Date()
       const [row] = await tx
         .insert(orders)
         .values({
@@ -148,7 +158,9 @@ export const createOrder = createServerFn({ method: 'POST' })
           wordCount: data.wordCount,
           slideCount: quote.slideCount,
           deadlineOption: deadline.id,
-          dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
+          createdAt: placedAt,
+          updatedAt: placedAt,
+          dueAt: deadlineInHours(placedAt, deadline.hours),
           extras: { ...data.extras, speakerNotes: quote.speakerNotesFee > 0 ? true : undefined },
           instructions: data.instructions.trim(),
           paymentMethod: 'paystack',
@@ -230,6 +242,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
       status: z.enum(staffOrderStatuses),
       currentStatus: z.enum(orderStatuses),
       deliveryVersion: z.number().int().nonnegative().optional(),
+      deadlineHours: deadlineHoursInput,
     }),
   )
   .handler(async ({ data, context }) => {
@@ -251,6 +264,14 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
 
     const fileKind = status === 'completed' ? 'final' : status === 'draft-ready' ? 'paper' : null
     const now = new Date()
+    const needsDeadline = staffDeadlineRequired({
+      status: order.status,
+      dueAt: order.agreedDueAt ?? order.dueAt,
+    }, status, now.getTime())
+    if (needsDeadline && data.deadlineHours === undefined) throw new Error(newDeadlineRequired)
+    const newDeadline = needsDeadline && data.deadlineHours !== undefined
+      ? deadlineInHours(now, data.deadlineHours)
+      : null
     await getDb().transaction(async (tx) => {
       const pendingDelivery = and(
         eq(orderFiles.orderId, order.id),
@@ -267,6 +288,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
         .set({
           status,
           updatedAt: now,
+          ...(newDeadline ? { agreedDueAt: newDeadline, detailsRevision: sql`${orders.detailsRevision} + 1` } : {}),
           ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
           ...(status === 'completed'
             ? { deliveredAt: now, deliveryVersion: sql`${orders.deliveryVersion} + 1` }
@@ -276,6 +298,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
           eq(orders.id, order.id),
           eq(orders.status, data.currentStatus),
           eq(orders.deliveryVersion, order.deliveryVersion),
+          eq(orders.detailsRevision, order.detailsRevision),
           status === 'paid' ? isNotNull(orders.paidAt) : undefined,
           status === 'cancelled' || status === 'awaiting-payment' ? isNull(orders.paidAt) : undefined,
           status === 'cancelled' ? isNull(orders.paymentReference) : undefined,
@@ -568,6 +591,7 @@ export const requestRevision = createServerFn({ method: 'POST' })
       code: z.string().max(20),
       deliveryVersion: z.number().int().nonnegative(),
       notes: z.string().trim().min(10).max(5000),
+      deadlineHours: deadlineHoursInput,
     }),
   )
   .handler(async ({ data, context }) => {
@@ -578,18 +602,25 @@ export const requestRevision = createServerFn({ method: 'POST' })
     if (!order) throw new Error('Order not found.')
     if (data.deliveryVersion !== order.deliveryVersion)
       throw new Error('A newer delivery is available. Refresh the order to review it.')
-    const revisionStatus = customerRevisionStatus(order)
+    const now = new Date()
+    const revisionStatus = customerRevisionStatus(order, now.getTime())
     if (revisionStatus === 'expired')
       throw new Error('The 14-day revision window has ended. Contact support for help.')
     if (revisionStatus === 'unavailable')
       throw new Error('Revisions open once your draft is delivered.')
-    const deadline = orderRevisionDeadline(order)
+    const needsDeadline = isDeadlinePast(order.agreedDueAt ?? order.dueAt, now.getTime())
+    if (needsDeadline && data.deadlineHours === undefined) throw new Error(newDeadlineRequired)
+    const newDeadline = needsDeadline && data.deadlineHours !== undefined
+      ? deadlineInHours(now, data.deadlineHours)
+      : null
+    const revisionWindowEnds = orderRevisionDeadline(order)
     await getDb().transaction(async (tx) => {
       const [updated] = await tx
         .update(orders)
         .set({
           status: 'revision',
-          updatedAt: new Date(),
+          updatedAt: now,
+          ...(newDeadline ? { agreedDueAt: newDeadline, detailsRevision: sql`${orders.detailsRevision} + 1` } : {}),
           ...(order.status === 'approved' && !order.approvedAt ? { approvedAt: order.updatedAt } : {}),
         })
         .where(and(
@@ -597,7 +628,8 @@ export const requestRevision = createServerFn({ method: 'POST' })
           eq(orders.userId, context.user.id),
           eq(orders.status, order.status),
           eq(orders.deliveryVersion, data.deliveryVersion),
-          deadline === null ? undefined : sql`clock_timestamp() < to_timestamp(${deadline / 1000}::double precision)`,
+          eq(orders.detailsRevision, order.detailsRevision),
+          revisionWindowEnds === null ? undefined : sql`clock_timestamp() < to_timestamp(${revisionWindowEnds / 1000}::double precision)`,
         ))
         .returning({ id: orders.id })
       if (!updated && customerRevisionStatus(order) === 'expired')
@@ -609,7 +641,7 @@ export const requestRevision = createServerFn({ method: 'POST' })
       await tx.insert(orderMessages).values({
         orderId: order.id,
         sender: 'client',
-        body: `Revision request: ${data.notes}`,
+        body: `Revision request: ${data.notes}${newDeadline ? `\n\nRequested turnaround: ${formatDeadlineDistance(newDeadline.getTime() - now.getTime())}.` : ''}`,
       })
     })
     return { ok: true }

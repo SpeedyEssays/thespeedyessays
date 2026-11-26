@@ -5,6 +5,8 @@ const session = vi.hoisted(() => ({
   releaseFiles: vi.fn(),
   approve: vi.fn(),
   findOrder: vi.fn(),
+  saveRevision: vi.fn(),
+  recordRevision: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -37,17 +39,21 @@ vi.mock("../../db", () => ({
         }),
         update: () => ({
           set: (values: { status?: string }) => ({
-            where:
-              values.status === "approved"
-                ? () => ({ returning: session.approve })
-                : session.releaseFiles,
+            where: () => {
+              if (values.status === "approved")
+                return { returning: session.approve };
+              if (values.status === "revision")
+                return { returning: () => session.saveRevision(values) };
+              return session.releaseFiles();
+            },
           }),
         }),
+        insert: () => ({ values: session.recordRevision }),
       }),
   }),
 }));
 
-import { approveOrder } from "./orders.functions";
+import { approveOrder, requestRevision } from "./orders.functions";
 
 const data = { code: "SE-48001", deliveryVersion: 3 };
 
@@ -61,6 +67,7 @@ beforeEach(() => {
         : null,
   );
   session.approve.mockResolvedValue([{ id: 1 }]);
+  session.saveRevision.mockResolvedValue([{ id: 1 }]);
 });
 
 it("allows a staff account to approve its own delivered order from the customer portal", async () => {
@@ -77,4 +84,36 @@ it("limits approval to the order owner even when the caller has staff access", a
   await expect(approveOrder({ data })).rejects.toThrow("Order not found.");
   expect(session.approve).not.toHaveBeenCalled();
   expect(session.releaseFiles).not.toHaveBeenCalled();
+});
+
+it("persists a new deadline with an overdue customer's revision request", async () => {
+  const deliveredAt = new Date();
+  session.findOrder.mockResolvedValue({
+    id: 1,
+    status: "completed",
+    deliveryVersion: 3,
+    detailsRevision: 0,
+    deliveredAt,
+    dueAt: new Date(deliveredAt.getTime() - 3_600_000),
+    agreedDueAt: null,
+  });
+  const notes = "Please add the cover page.";
+  await expect(requestRevision({ data: { ...data, notes } })).rejects.toThrow(
+    "Choose a new deadline",
+  );
+  expect(session.saveRevision).not.toHaveBeenCalled();
+
+  await expect(
+    requestRevision({ data: { ...data, notes, deadlineHours: 1 } }),
+  ).resolves.toEqual({ ok: true });
+  const change = session.saveRevision.mock.calls[0][0];
+  expect(change.status).toBe("revision");
+  expect(change.agreedDueAt.getTime() - change.updatedAt.getTime()).toBe(
+    3_600_000,
+  );
+  expect(session.recordRevision).toHaveBeenCalledExactlyOnceWith({
+    orderId: 1,
+    sender: "client",
+    body: `Revision request: ${notes}\n\nRequested turnaround: 1 hour.`,
+  });
 });

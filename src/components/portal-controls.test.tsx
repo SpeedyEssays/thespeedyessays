@@ -5,6 +5,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import type { AdminOrderView, OrderView } from "@/lib/orders";
 import { CustomerNotifications } from "./customer-notifications";
+import { OrderDeadline } from "./order-deadline";
 import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
@@ -118,12 +119,13 @@ it("lets staff reopen the same cancelled order without selecting customer approv
     status: "cancelled",
     checkoutStarted: false,
     paidAt: null,
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
     deliveryVersion: 0,
     files: [],
   } as unknown as AdminOrderView;
   const onSaved = vi.fn().mockResolvedValue(undefined);
   stubs.updateOrderStatus.mockResolvedValue({ ok: true });
-  render(<StaffOrderStatus order={order} onSaved={onSaved} />);
+  render(<StaffOrderStatus order={order} now={Date.now()} onSaved={onSaved} />);
 
   expect(
     screen.queryByRole("option", { name: "Approved" }),
@@ -144,6 +146,40 @@ it("lets staff reopen the same cancelled order without selecting customer approv
     },
   });
   expect(onSaved).toHaveBeenCalledWith("Order reopened.");
+});
+
+it("requires a new deadline when staff reopens an overdue order", async () => {
+  const user = userEvent.setup();
+  const now = Date.now();
+  const order = {
+    code: "SE-48001",
+    status: "cancelled",
+    checkoutStarted: false,
+    paidAt: null,
+    dueAt: new Date(now - 3_600_000).toISOString(),
+    deliveryVersion: 0,
+    files: [],
+  } as unknown as AdminOrderView;
+  stubs.updateOrderStatus.mockResolvedValue({ ok: true });
+  render(<StaffOrderStatus order={order} now={now} onSaved={vi.fn()} />);
+  const reopen = screen.getByRole("button", { name: "Reopen order" });
+  expect(reopen).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("Unit"), "days");
+  const duration = screen.getByLabelText("Time allowed");
+  await user.type(duration, "15");
+  expect(reopen).toBeDisabled();
+  await user.clear(duration);
+  await user.type(duration, "14");
+  await user.click(reopen);
+  expect(stubs.updateOrderStatus).toHaveBeenCalledExactlyOnceWith({
+    data: {
+      code: order.code,
+      status: "awaiting-payment",
+      currentStatus: "cancelled",
+      deliveryVersion: 0,
+      deadlineHours: 336,
+    },
+  });
 });
 
 it("requires staff to select a delivery type and a review PDF for a Word final", async () => {
@@ -215,11 +251,52 @@ function deliveredOrder() {
   } as OrderView;
 }
 
+it("counts down from the saved deadline and marks an active order overdue at expiry", () => {
+  const deadline = Date.parse("2026-12-10T12:00:00Z");
+  const order = {
+    ...deliveredOrder(),
+    status: "awaiting-payment" as const,
+    dueAt: new Date(deadline).toISOString(),
+    deliveredAt: null,
+  };
+  const { rerender } = render(
+    <OrderDeadline order={order} now={deadline - 12 * 86_400_000} />,
+  );
+  expect(screen.getByText("Due in 12 days")).toHaveClass("text-success");
+  rerender(<OrderDeadline order={order} now={deadline + 25 * 3_600_000} />);
+  expect(screen.getByText("Overdue by 1 day 1 hour")).toHaveClass(
+    "text-destructive",
+  );
+});
+
+it("lets an eligible customer set a one-hour deadline for an overdue revision", async () => {
+  const user = userEvent.setup();
+  const now = Date.now();
+  const order = {
+    ...deliveredOrder(),
+    dueAt: new Date(now - 3_600_000).toISOString(),
+  };
+  const notes = "Please add the cover page.";
+  stubs.requestRevision.mockResolvedValue({ ok: true });
+  render(<OrderPanel order={order} now={now} />);
+
+  await user.click(screen.getByRole("button", { name: "Request a revision" }));
+  await user.type(screen.getByLabelText("What needs to change?"), notes);
+  const submit = screen.getByRole("button", { name: "Send revision request" });
+  expect(submit).toBeDisabled();
+  await user.type(screen.getByLabelText("Time allowed"), "1");
+  await user.click(submit);
+  await screen.findByText("Revision requested.");
+  expect(stubs.requestRevision).toHaveBeenCalledExactlyOnceWith({
+    data: { code: order.code, deliveryVersion: 3, notes, deadlineHours: 1 },
+  });
+});
+
 it("offers the preview and a red revision action alongside approval, then shows the clean download and rating", async () => {
   const user = userEvent.setup();
   const order = deliveredOrder();
   stubs.approveOrder.mockResolvedValue({ ok: true });
-  const { rerender } = render(<OrderPanel order={order} />);
+  const { rerender } = render(<OrderPanel order={order} now={Date.now()} />);
 
   expect(
     screen.getByRole("link", { name: "Open preview of Final.docx" }),
@@ -243,6 +320,7 @@ it("offers the preview and a red revision action alongside approval, then shows 
   );
   rerender(
     <OrderPanel
+      now={Date.now()}
       order={{
         ...order,
         status: "approved",
@@ -261,7 +339,12 @@ it("offers the preview and a red revision action alongside approval, then shows 
 
 it("removes the customer revision action after the window closes and keeps approval available", () => {
   const order = deliveredOrder();
-  render(<OrderPanel order={{ ...order, revisionStatus: "expired" }} />);
+  render(
+    <OrderPanel
+      order={{ ...order, revisionStatus: "expired" }}
+      now={Date.now()}
+    />,
+  );
   expect(
     screen.queryByRole("button", { name: "Request a revision" }),
   ).not.toBeInTheDocument();
@@ -272,7 +355,7 @@ it("removes the customer revision action after the window closes and keeps appro
 });
 
 it("keeps approval out of the staff view of a delivered order", () => {
-  render(<OrderPanel order={deliveredOrder()} staff />);
+  render(<OrderPanel order={deliveredOrder()} now={Date.now()} staff />);
   expect(
     screen.queryByRole("button", { name: "Approve order" }),
   ).not.toBeInTheDocument();
@@ -394,7 +477,7 @@ it.each(["awaiting-payment", "in-progress"] as const)(
     stubs.startCheckout
       .mockRejectedValueOnce(new Error("Checkout is unavailable right now."))
       .mockResolvedValueOnce({ url: "#checkout-retry" });
-    const { rerender } = render(<OrderPanel order={order} />);
+    const { rerender } = render(<OrderPanel order={order} now={Date.now()} />);
 
     await user.click(screen.getByRole("button", { name: "Complete payment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -412,6 +495,7 @@ it.each(["awaiting-payment", "in-progress"] as const)(
 
     rerender(
       <OrderPanel
+        now={Date.now()}
         order={{
           ...order,
           status: "in-progress",

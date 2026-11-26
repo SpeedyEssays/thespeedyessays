@@ -3,7 +3,6 @@ import { and, eq, isNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
 import { orders } from '../../db/schema'
-import { deadlines } from './pricing'
 
 export const currency = 'USD'
 export const paymentReferenceSchema = z.string().regex(/^se-[0-9a-f-]{36}$/)
@@ -150,19 +149,12 @@ export async function reconcilePayment(
     throw new Error('The payment does not match the order.')
   }
   const now = new Date()
-  const deadline = deadlines.find(
-    (option) => option.id === order.deadlineOption,
-  )
-  const due = deadline
-    ? new Date(now.getTime() + deadline.hours * 3600000)
-    : order.dueAt
   const [recorded] = await db
     .update(orders)
     .set({
       status: sql`case when ${orders.status} = 'awaiting-payment' then 'in-progress' else ${orders.status} end`,
       paidAt: now,
       updatedAt: now,
-      dueAt: sql`case when ${orders.status} = 'awaiting-payment' then ${due.toISOString()}::timestamptz else ${orders.dueAt} end`,
     })
     .where(
       and(

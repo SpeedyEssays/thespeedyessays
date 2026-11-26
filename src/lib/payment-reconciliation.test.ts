@@ -15,6 +15,7 @@ const order = {
   id: 1,
   priceCents: 2000,
   status: "awaiting-payment",
+  deadlineOption: "7d",
   dueAt: new Date("2026-12-01T00:00:00Z"),
   paidAt: null,
 };
@@ -61,6 +62,8 @@ it("records a verified live USD payment on the existing order", async () => {
   expect(recordPayment).toHaveBeenCalledWith(
     expect.objectContaining({ paidAt: expect.any(Date) }),
   );
+  expect(recordPayment.mock.calls[0][0]).not.toHaveProperty("dueAt");
+  expect(recordPayment.mock.calls[0][0]).not.toHaveProperty("agreedDueAt");
   expect(
     new PgDialect().sqlToQuery(recordPayment.mock.calls[0][0].status).sql,
   ).toContain(

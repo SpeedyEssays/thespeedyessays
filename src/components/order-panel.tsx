@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
+import { DeadlineDurationField } from '@/components/deadline-duration-field'
+import { OrderDeadline } from '@/components/order-deadline'
 import { OrderFeedbackForm } from '@/components/order-feedback-form'
 import { AddFilePreview, OrderFileUpload } from '@/components/order-file-upload'
 import { OrderPayment } from '@/components/order-payment'
+import { hasOpenDeadline, isDeadlinePast } from '@/lib/order-deadline'
 import {
   approveOrder,
   getOrderMessages,
@@ -25,16 +28,18 @@ import {
   type OrderFileView,
   type OrderView,
 } from '@/lib/orders'
-import { assignmentTypeLabel, formatOrderLength, formatUSD, orderServices } from '@/lib/pricing'
+import { assignmentTypeLabel, deadlines, formatOrderLength, formatUSD, orderServices } from '@/lib/pricing'
 import { orderLanguages, orderSoftware } from '@/lib/order-requirements'
 
 export function OrderPanel({
   order,
+  now,
   staff = false,
   replyNotice,
   onRead,
 }: {
   order: OrderView
+  now: number | null
   staff?: boolean
   replyNotice?: string
   onRead?: () => void
@@ -45,17 +50,12 @@ export function OrderPanel({
   const [notice, setNotice] = useState('')
   const [revision, setRevision] = useState('')
   const [showRevision, setShowRevision] = useState(false)
-  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
-  const deadline = orderRevisionDeadline(order)
+  const [revisionHours, setRevisionHours] = useState<number>()
+  const revisionWindowEnds = orderRevisionDeadline(order)
   const revisionExpired = order.revisionStatus === 'expired' ||
-    (order.revisionStatus === 'available' && deadline !== null && expiredDeadline === deadline)
+    (order.revisionStatus === 'available' && revisionWindowEnds !== null && now !== null && now >= revisionWindowEnds)
   const canRevise = order.revisionStatus === 'available' && !revisionExpired
-
-  useEffect(() => {
-    if (order.revisionStatus !== 'available' || deadline === null) return
-    const timer = window.setTimeout(() => setExpiredDeadline(deadline), Math.max(0, deadline - Date.now()))
-    return () => window.clearTimeout(timer)
-  }, [deadline, order.revisionStatus])
+  const needsRevisionDeadline = now !== null && isDeadlinePast(order.dueAt, now)
 
   const load = useCallback(
     () => getOrderMessages({ data: { code: order.code } }),
@@ -94,7 +94,13 @@ export function OrderPanel({
   }
 
   const payable = canCheckout(order)
-  const active = !['cancelled', 'completed', 'approved'].includes(order.status)
+  const active = hasOpenDeadline(order.status)
+  const turnaround = deadlines.find((option) => option.id === order.deadlineOption)?.label
+  const length = formatOrderLength(order.pages, order.wordCount, order.slideCount)
+  const language = order.language && orderLanguages[order.language]
+  const software = order.software && `${order.softwareDetails || orderSoftware[order.software]}${
+    order.softwareFeeCents > 0 ? ` (+${formatUSD(order.softwareFeeCents / 100)} USD)` : ''
+  }`
   const customerFiles = order.files.filter((file) => file.kind === 'brief')
   const staffFiles = order.files.filter((file) => file.kind !== 'brief')
   const deliveries = staffFileKinds
@@ -123,41 +129,58 @@ export function OrderPanel({
         <h2 className="mt-2 break-words text-2xl font-semibold">
           {order.title}
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {assignmentTypeLabel(order.type)} · {order.subject} · {order.level} · {order.style} ·{' '}
-          {formatOrderLength(order.pages, order.wordCount, order.slideCount)}
-        </p>
-        {order.service !== 'writing' && (
-          <p className="mt-1 text-sm">{orderServices[order.service].label}</p>
-        )}
-        {order.language && <p className="mt-1 text-sm">Language · {orderLanguages[order.language]}</p>}
-        {order.speakerNotes && <p className="mt-1 text-sm">Speaker notes · Separate Word document</p>}
-        {order.software && (
-          <p className="mt-1 break-words text-sm">
-            Software · {order.softwareDetails || orderSoftware[order.software]}
-            {order.softwareFeeCents > 0 && ` (+${formatUSD(order.softwareFeeCents / 100)} USD)`}
-          </p>
-        )}
-        <p className="mt-1 text-sm">
-          {order.priceAdjustment && (
-            <del className="mr-2 text-muted-foreground">{formatUSD(order.priceAdjustment.originalCents / 100)}</del>
-          )}
-          {formatUSD(order.price)} USD ·{' '}
-          {!staff &&
-          order.status === 'awaiting-payment' &&
-          !order.agreedDueAt
-            ? 'Deadline starts after payment'
-            : `Due ${order.dueAt.slice(0, 16).replace('T', ' ')} UTC`}
-        </p>
-        {(order.paidAt || payable) && (
-          <p className={`mt-1 text-sm font-medium ${order.paidAt ? 'text-success' : 'text-foreground'}`}>
-            {order.paidAt ? 'Payment confirmed' : 'Payment due'}
-          </p>
+        <div className="mt-3 flex flex-wrap items-start gap-x-8 gap-y-2 rounded-lg border bg-background px-3 py-2 text-sm">
+          <div>
+            <OrderDeadline order={order} now={now} showDate />
+            {turnaround && !staff && <p className="mt-1 text-xs text-muted-foreground">Selected turnaround · {turnaround}</p>}
+          </div>
+          <div>
+            <p className="font-semibold">
+              {order.priceAdjustment && (
+                <del className="mr-2 font-normal text-muted-foreground">{formatUSD(order.priceAdjustment.originalCents / 100)}</del>
+              )}
+              {formatUSD(order.price)} USD
+            </p>
+            {(order.paidAt || payable) && (
+              <p className={`text-xs font-medium ${order.paidAt ? 'text-success' : 'text-muted-foreground'}`}>
+                {order.paidAt ? 'Payment confirmed' : 'Payment due'}
+              </p>
+            )}
+          </div>
+        </div>
+        {staff ? (
+          <div className="mt-4 space-y-2">
+            <h3 className="text-base font-semibold">Order details</h3>
+            <OrderDetailTable details={[
+              ['Assignment', assignmentTypeLabel(order.type)],
+              ['Subject', order.subject],
+              ['Academic level', order.level],
+              ['Service', orderServices[order.service].label],
+              ['Citation style', order.style],
+              ['Length', length],
+              ['Sources', order.sources],
+              ['Language', language || '—'],
+              ['Software', software || 'None'],
+              ['Selected turnaround', turnaround ?? order.deadlineOption],
+              ...(order.speakerNotes ? [['Speaker notes', 'Separate Word document'] as const] : []),
+            ]} />
+          </div>
+        ) : (
+          <div className="mt-3 space-y-1 text-sm">
+            <p className="text-muted-foreground">
+              {assignmentTypeLabel(order.type)} · {order.subject} · {order.level} · {order.style} · {length}
+            </p>
+            {order.service !== 'writing' && <p>{orderServices[order.service].label}</p>}
+            {language && <p>Language · {language}</p>}
+            {order.speakerNotes && <p>Speaker notes · Separate Word document</p>}
+            {software && <p className="break-words">Software · {software}</p>}
+          </div>
         )}
         {order.instructions && (
-          <p className="mt-3 whitespace-pre-wrap break-words text-sm">
-            {order.instructions}
-          </p>
+          <div className="mt-3">
+            {staff && <h3 className="mb-1 text-base font-semibold">Instructions</h3>}
+            <p className="whitespace-pre-wrap break-words text-sm">{order.instructions}</p>
+          </div>
         )}
       </div>
       {!staff && payable && (
@@ -233,7 +256,10 @@ export function OrderPanel({
                   variant="destructive"
                   disabled={busy}
                   aria-expanded={showRevision}
-                  onClick={() => setShowRevision((open) => !open)}
+                  onClick={() => {
+                    setShowRevision((open) => !open)
+                    setRevisionHours(undefined)
+                  }}
                 >
                   Request a revision
                 </Button>
@@ -249,11 +275,18 @@ export function OrderPanel({
                 className="space-y-2"
                 onSubmit={(event) => {
                   event.preventDefault()
+                  if (busy || (needsRevisionDeadline && revisionHours === undefined)) return
                   void run(async () => {
                     await requestRevision({
-                      data: { code: order.code, deliveryVersion: order.deliveryVersion, notes: revision },
+                      data: {
+                        code: order.code,
+                        deliveryVersion: order.deliveryVersion,
+                        notes: revision,
+                        ...(needsRevisionDeadline ? { deadlineHours: revisionHours } : {}),
+                      },
                     })
                     setRevision('')
+                    setRevisionHours(undefined)
                     setShowRevision(false)
                   }, 'Revision requested.')
                 }}
@@ -268,7 +301,20 @@ export function OrderPanel({
                   onChange={(event) => setRevision(event.target.value)}
                   required
                 />
-                <Button size="sm" variant="destructive" type="submit" disabled={busy}>
+                {needsRevisionDeadline && (
+                  <DeadlineDurationField
+                    id="revision-duration"
+                    description="The order deadline has passed. Set a turnaround for your revision."
+                    disabled={busy}
+                    onChange={setRevisionHours}
+                  />
+                )}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  type="submit"
+                  disabled={busy || (needsRevisionDeadline && revisionHours === undefined)}
+                >
                   Send revision request
                 </Button>
               </form>
@@ -306,6 +352,19 @@ export function OrderPanel({
         />
       </section>
     </section>
+  )
+}
+
+function OrderDetailTable({ details }: { details: ReadonlyArray<readonly [string, string | number]> }) {
+  return (
+    <dl className="grid overflow-hidden rounded-lg border bg-background sm:grid-cols-2">
+      {details.map(([label, value]) => (
+        <div key={label} className="flex min-w-0 flex-col gap-0.5 border-b border-r px-3 py-2 text-sm">
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="break-words font-medium">{value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

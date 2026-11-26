@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { DeadlineDurationField } from "@/components/deadline-duration-field";
+import { hasOpenDeadline, staffDeadlineRequired } from "@/lib/order-deadline";
 import {
   canChangeUnpaidQuote,
   staffOrderStatuses,
@@ -13,17 +15,22 @@ import { updateOrderStatus } from "@/lib/orders.functions";
 
 export function StaffOrderStatus({
   order,
+  now,
   onSaved,
 }: {
   order: AdminOrderView;
+  now: number | null;
   onSaved: (message: string) => Promise<unknown>;
 }) {
-  const reopened = order.status === "cancelled";
   const [target, setTarget] = useState<OrderStatus>(
-    reopened ? "awaiting-payment" : order.status,
+    order.status === "cancelled" ? "awaiting-payment" : order.status,
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const [deadlineHours, setDeadlineHours] = useState<number>();
+  const reopened = !hasOpenDeadline(order.status) && hasOpenDeadline(target);
+  const needsDeadline =
+    now !== null && staffDeadlineRequired(order, target, now);
   const undelivered = order.files.filter((file) => file.access === "pending");
   const deliverAgain =
     target === "completed" &&
@@ -53,7 +60,8 @@ export function StaffOrderStatus({
     (target !== order.status || deliverAgain) &&
     choices.includes(target) &&
     !missingFile &&
-    !needsPreview;
+    !needsPreview &&
+    (!needsDeadline || deadlineHours !== undefined);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,6 +75,7 @@ export function StaffOrderStatus({
           status: target,
           currentStatus: order.status,
           deliveryVersion: order.deliveryVersion,
+          ...(needsDeadline ? { deadlineHours } : {}),
         },
       });
       await onSaved(
@@ -103,6 +112,7 @@ export function StaffOrderStatus({
           disabled={busy}
           onChange={(event) => {
             setTarget(event.target.value as OrderStatus);
+            setDeadlineHours(undefined);
             setProblem("");
           }}
         >
@@ -129,6 +139,15 @@ export function StaffOrderStatus({
                   : "Save status"}
         </Button>
       </div>
+      {needsDeadline && (
+        <DeadlineDurationField
+          key={target}
+          id="reopen-duration"
+          description="The saved deadline has passed. Set a new turnaround to continue this order."
+          disabled={busy}
+          onChange={setDeadlineHours}
+        />
+      )}
       {reopened && (
         <p className="text-xs text-muted-foreground">
           Reopen this order to keep its number, files and messages.

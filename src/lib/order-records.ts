@@ -53,6 +53,7 @@ function toView(
     wordCount: row.wordCount,
     slideCount: row.slideCount,
     speakerNotes: row.slideCount != null && row.extras.speakerNotes === true,
+    deadlineOption: row.deadlineOption,
     dueAt: (row.agreedDueAt ?? row.dueAt).toISOString(),
     agreedDueAt: row.agreedDueAt?.toISOString() ?? null,
     placedAt: row.createdAt.toISOString(),
@@ -133,7 +134,6 @@ export async function listAllOrders(
     clientName: order.clientName,
     awaitingReply: lastSender === 'client',
     detailsRevision: order.detailsRevision,
-    deadlineOption: order.deadlineOption,
   }))
 }
 

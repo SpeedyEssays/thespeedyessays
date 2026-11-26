@@ -171,6 +171,7 @@ export type OrderView = {
   wordCount: number | null
   slideCount: number | null
   speakerNotes: boolean
+  deadlineOption: string
   dueAt: string
   agreedDueAt: string | null
   placedAt: string
@@ -197,7 +198,6 @@ export type AdminOrderView = OrderView & {
   clientName: string | null
   awaitingReply: boolean
   detailsRevision: number
-  deadlineOption: string
 }
 
 export type OrderMessageView = {

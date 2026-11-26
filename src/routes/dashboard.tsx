@@ -11,6 +11,7 @@ import { UnreadBadge } from '@/components/chat-indicators'
 import { SupportChat } from '@/components/chat-widget'
 import { CustomerNotifications } from '@/components/customer-notifications'
 import { Button } from '@/components/ui/button'
+import { OrderDeadline } from '@/components/order-deadline'
 import { OrderPanel } from '@/components/order-panel'
 import { getMyDisplayName } from '@/lib/customers.functions'
 import { getCustomerInboxCounts } from '@/lib/chat.functions'
@@ -20,6 +21,7 @@ import { refreshPayment } from '@/lib/payments.functions'
 import { canCheckout, statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
+import { useOrderClock } from '@/lib/use-order-clock'
 
 const orderGroupLabels = {
   'awaiting-payment': 'Orders awaiting payment',
@@ -87,6 +89,7 @@ function Dashboard() {
   useCustomerActivity(!user.isAdmin)
   const { data: counts, refresh: refreshUnread } = useInboxData(getCustomerInboxCounts)
   const { orders, displayName } = Route.useLoaderData()
+  const now = useOrderClock()
   const { order, reference, paymentExit, tab } = Route.useSearch()
   const router = useRouter()
   const [paymentNotice, setPaymentNotice] = useState('')
@@ -226,10 +229,11 @@ function Dashboard() {
           </div>
           {selected ? (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <CustomerOrderList orders={orders} selected={selected.code} unreadByOrder={counts?.orders} />
+              <CustomerOrderList orders={orders} selected={selected.code} unreadByOrder={counts?.orders} now={now} />
               <OrderPanel
                 key={selected.code}
                 order={selected}
+                now={now}
                 onRead={refreshUnread}
               />
             </div>
@@ -248,10 +252,12 @@ function CustomerOrderList({
   orders,
   selected,
   unreadByOrder,
+  now,
 }: {
   orders: OrderView[]
   selected: string
   unreadByOrder?: Record<string, number>
+  now: number | null
 }) {
   const groups = Object.entries(orderGroupLabels)
     .map(([key, label]) => ({
@@ -282,6 +288,9 @@ function CustomerOrderList({
                 <UnreadBadge count={unreadByOrder?.[item.code]} />
               </span>
               <span className="block break-words">{item.title}</span>
+              <span className="mt-1 block text-xs">
+                <OrderDeadline order={item} now={now} />
+              </span>
             </Link>
           ))}
         </div>
