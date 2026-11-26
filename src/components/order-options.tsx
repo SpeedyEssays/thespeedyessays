@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,6 +11,7 @@ import {
   maxOrderLength,
   orderServiceIds,
   orderServices,
+  SPEAKER_NOTES_FEE,
   WORDS_PER_PAGE,
   type AssignmentType,
   type LengthUnit,
@@ -87,18 +89,14 @@ export function OrderLengthField({
   onChange,
   quote,
   error,
-  allowSlides = false,
 }: {
   id: string;
   length: OrderLength;
   onChange: (length: OrderLength) => void;
   quote: { pages: number; words: number; perSlide: number };
   error?: string;
-  allowSlides?: boolean;
 }) {
-  const units: LengthUnit[] = allowSlides
-    ? ["pages", "words", "slides"]
-    : ["pages", "words"];
+  const units: LengthUnit[] = ["pages", "words", "slides"];
   const description = {
     pages: `About ${quote.words.toLocaleString("en-US")} words at ${WORDS_PER_PAGE} words per double-spaced page.`,
     words: `${formatOrderLength(quote.pages, quote.words)}. ${WORDS_PER_PAGE} words per billable page, rounded up.`,
@@ -151,5 +149,35 @@ export function OrderLengthField({
         {error || description[length.unit]}
       </p>
     </fieldset>
+  );
+}
+
+export function SpeakerNotesField({
+  id,
+  checked,
+  onChange,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <Label
+      htmlFor={id}
+      className="flex cursor-pointer items-start gap-3 rounded-md border p-3"
+    >
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(value) => onChange(value === true)}
+      />
+      <span className="flex-1">
+        <span className="block font-medium">Speaker notes</span>
+        <span className="block text-xs font-normal text-muted-foreground">
+          Separate Word document
+        </span>
+      </span>
+      <span className="font-medium">+{formatUSD(SPEAKER_NOTES_FEE)}</span>
+    </Label>
   );
 }

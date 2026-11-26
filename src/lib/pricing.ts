@@ -1,13 +1,13 @@
 // Pricing model shared by the homepage calculator and the order form.
 // The academic level, service and deadline determine the billable page rate.
 
-import { SOFTWARE_FEE_CENTS, type OrderSoftware } from './order-requirements'
+import type { OrderSoftware } from './order-requirements'
 
 export const academicLevels = [
-  { id: 'high-school', label: 'High School', rate: 5 },
-  { id: 'undergraduate', label: 'Undergraduate', rate: 8 },
-  { id: 'masters', label: "Master's", rate: 12 },
-  { id: 'phd', label: 'PhD', rate: 18 },
+  { id: 'high-school', label: 'High School', rate: 5, slideRate: 3.7, softwareFee: 40 },
+  { id: 'undergraduate', label: 'Undergraduate', rate: 8, slideRate: 5.9, softwareFee: 55 },
+  { id: 'masters', label: "Master's", rate: 12, slideRate: 8.9, softwareFee: 70 },
+  { id: 'phd', label: 'PhD', rate: 18, slideRate: 13.3, softwareFee: 85 },
 ] as const
 
 export const deadlines = [
@@ -106,7 +106,8 @@ export const WORDS_PER_PAGE = 275
 export const MAX_ORDER_PAGES = 10_000
 export const MAX_ORDER_WORDS = MAX_ORDER_PAGES * WORDS_PER_PAGE
 export const MAX_ORDER_SLIDES = 10_000
-const SLIDE_RATE_FACTOR = 0.6
+export const SPEAKER_NOTES_FEE = 10
+export const MIN_CHECKOUT_CENTS = 200
 
 export type LengthUnit = 'pages' | 'words' | 'slides'
 export type OrderLength = { unit: LengthUnit; amount: string }
@@ -164,6 +165,21 @@ export type Extras = {
   topWriter?: boolean
   draftPreview?: boolean
   abstractPage?: boolean
+  speakerNotes?: boolean
+}
+
+export type PriceAdjustment =
+  | { kind: 'discount-code'; originalCents: number; code: string; percent: number }
+  | { kind: 'special-price'; originalCents: number }
+
+export function softwareWorkFee(level: string, deadline: string) {
+  const rate = academicLevels.find((item) => item.id === level || item.label === level) ?? academicLevels[1]
+  const timing = deadlines.find((item) => item.id === deadline) ?? deadlines[0]
+  return round(rate.softwareFee * timing.multiplier)
+}
+
+export function discountedTotalCents(subtotalCents: number, percent: number) {
+  return subtotalCents - Math.round(subtotalCents * percent / 100)
 }
 
 export const extraPrices = {
@@ -181,6 +197,7 @@ export function estimatePrice(input: {
   service?: OrderService
   software?: OrderSoftware | null
   extras?: Extras
+  discountPercent?: number
 }) {
   const level = academicLevels.find((l) => l.id === input.level) ?? academicLevels[1]
   const deadline = deadlines.find((d) => d.id === input.deadline) ?? deadlines[0]
@@ -192,7 +209,7 @@ export function estimatePrice(input: {
   const service = orderServices[input.service ?? 'writing']
   const rate = level.rate * deadline.multiplier * service.rate
   const perPage = round(rate)
-  const perSlide = round(rate * SLIDE_RATE_FACTOR)
+  const perSlide = round(level.slideRate * deadline.multiplier * service.rate)
   const base = round(slideCount === undefined ? perPage * pages : perSlide * slideCount)
 
   let extras = 0
@@ -200,7 +217,11 @@ export function estimatePrice(input: {
   if (input.extras?.draftPreview) extras += extraPrices.draftPreview.flat
   if (input.extras?.abstractPage) extras += extraPrices.abstractPage.flat
   extras = round(extras)
-  const softwareFee = input.software ? SOFTWARE_FEE_CENTS / 100 : 0
+  const softwareRate = softwareWorkFee(level.id, deadline.id)
+  const softwareFee = input.software ? softwareRate : 0
+  const speakerNotesFee = slideCount !== undefined && input.extras?.speakerNotes ? SPEAKER_NOTES_FEE : 0
+  const subtotalCents = Math.round((base + extras + softwareFee + speakerNotesFee) * 100)
+  const totalCents = discountedTotalCents(subtotalCents, input.discountPercent ?? 0)
 
   return {
     perPage,
@@ -209,8 +230,12 @@ export function estimatePrice(input: {
     slideCount,
     base,
     extras,
+    softwareRate,
     softwareFee,
-    total: round(base + extras + softwareFee),
+    speakerNotesFee,
+    subtotal: subtotalCents / 100,
+    discount: (subtotalCents - totalCents) / 100,
+    total: totalCents / 100,
     words: slideCount === undefined ? (wordCount ?? pages * WORDS_PER_PAGE) : 0,
   }
 }

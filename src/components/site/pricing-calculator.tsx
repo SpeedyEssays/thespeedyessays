@@ -3,12 +3,14 @@ import { Link } from '@tanstack/react-router'
 import { ArrowRight, Clock } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { OrderLengthField, OrderServiceField, PaperTypeField } from '@/components/order-options'
+import { DiscountCodeField } from '@/components/discount-code-field'
+import { OrderLengthField, OrderServiceField, PaperTypeField, SpeakerNotesField } from '@/components/order-options'
 import { OrderSoftwareField } from '@/components/order-requirement-fields'
 import { selectedSoftware, type SoftwareSelection } from '@/lib/order-requirements'
+import { minimumDiscountMessage, type DiscountQuote } from '@/lib/discount-codes'
 import {
   academicLevels, deadlines, estimatePrice, formatUSD, lengthForAssignment, maxOrderLength,
-  parseOrderLength, PRESENTATION_TYPE, quoteLength,
+  MIN_CHECKOUT_CENTS, parseOrderLength, PRESENTATION_TYPE, quoteLength,
   type AcademicLevelId, type AssignmentType, type DeadlineId, type OrderLength, type OrderService,
 } from '@/lib/pricing'
 import { cn } from '@/lib/utils'
@@ -22,12 +24,16 @@ export function PricingCalculator({ className }: { className?: string }) {
   const [service, setService] = useState<OrderService>('writing')
   const [length, setLength] = useState<OrderLength>({ unit: 'pages', amount: '3' })
   const [software, setSoftware] = useState<SoftwareSelection>('none')
+  const [speakerNotes, setSpeakerNotes] = useState(false)
+  const [discount, setDiscount] = useState<DiscountQuote | null>(null)
   const validLength = parseOrderLength(length.amount, length.unit) !== undefined
-  const canContinue = validLength && software !== ''
-  const input = { level, service, software: selectedSoftware(software), ...quoteLength(length) }
+  const input = { level, service, software: selectedSoftware(software), ...quoteLength(length),
+    extras: { speakerNotes }, discountPercent: discount?.percent }
   const quote = estimatePrice({ ...input, deadline })
   const relaxed = estimatePrice({ ...input, deadline: '14d' })
   const isSlideQuote = length.unit === 'slides'
+  const belowMinimum = Boolean(discount && Math.round(quote.total * 100) < MIN_CHECKOUT_CENTS)
+  const canContinue = validLength && software !== '' && !belowMinimum
 
   return (
     <div className={cn('rounded-2xl border bg-card p-6 shadow-xl shadow-primary/5 sm:p-8', className)}>
@@ -90,29 +96,36 @@ export function PricingCalculator({ className }: { className?: string }) {
         <OrderLengthField
           id="calc-length"
           length={length}
-          onChange={setLength}
+          onChange={(next) => {
+            setLength(next)
+            if (next.unit === 'slides') setType(PRESENTATION_TYPE)
+          }}
           quote={quote}
-          allowSlides={type === PRESENTATION_TYPE}
           error={validLength ? undefined : `Enter 1 to ${maxOrderLength(length.unit).toLocaleString('en-US')} ${length.unit}.`}
         />
-        <OrderSoftwareField id="calc-software" value={software} onChange={setSoftware} />
+        {isSlideQuote && <SpeakerNotesField id="calc-speaker-notes" checked={speakerNotes} onChange={setSpeakerNotes} />}
+        <OrderSoftwareField id="calc-software" value={software} onChange={setSoftware} fee={quote.softwareRate} />
+        <DiscountCodeField id="calc-discount" discount={discount} onChange={setDiscount} />
+        {belowMinimum && <p role="alert" className="text-sm text-destructive">{minimumDiscountMessage}</p>}
       </div>
 
       <div className="mt-8 flex flex-col gap-4 rounded-xl bg-secondary p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Estimated total</p>
           <p className="font-display text-4xl font-semibold tabular-nums" aria-live="polite">
-            {validLength ? formatUSD(quote.total) : '—'}
+            {validLength && !belowMinimum ? formatUSD(quote.total) : '—'}
           </p>
           <p className="text-xs text-muted-foreground">
             {formatUSD(isSlideQuote ? quote.perSlide : quote.perPage)} per {isSlideQuote ? 'slide' : 'page'}
-            {validLength && quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
+            {canContinue && Math.round(relaxed.total * 100) >= MIN_CHECKOUT_CENTS && quote.total > relaxed.total && <> · save {formatUSD(quote.total - relaxed.total)} with a 14-day deadline</>}
           </p>
           {quote.softwareFee > 0 && (
             <p className="text-xs text-muted-foreground">
               Includes {formatUSD(quote.softwareFee)} for software work
             </p>
           )}
+          {quote.speakerNotesFee > 0 && <p className="text-xs text-muted-foreground">Includes {formatUSD(quote.speakerNotesFee)} for speaker notes</p>}
+          {quote.discount > 0 && !belowMinimum && <p className="text-xs text-muted-foreground">Discount −{formatUSD(quote.discount)}</p>}
         </div>
         {canContinue ? (
           <Button size="lg" asChild>
@@ -125,6 +138,8 @@ export function PricingCalculator({ className }: { className?: string }) {
               pages: length.unit === 'pages' ? quote.pages : undefined,
               words: input.wordCount,
               slides: input.slideCount,
+              speakerNotes: isSlideQuote && speakerNotes ? true : undefined,
+              discount: discount?.code,
             }}>
               Continue to order <ArrowRight />
             </Link>

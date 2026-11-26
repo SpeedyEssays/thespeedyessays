@@ -33,7 +33,6 @@ export const orderSoftware = {
 
 export type OrderSoftware = keyof typeof orderSoftware;
 export const orderSoftwareIds = Object.keys(orderSoftware) as OrderSoftware[];
-export const SOFTWARE_FEE_CENTS = 400;
 export const MAX_SOFTWARE_DETAILS = 250;
 
 // An empty selection means Yes was chosen, but a tool has not been selected.

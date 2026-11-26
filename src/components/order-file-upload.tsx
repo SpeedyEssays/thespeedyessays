@@ -46,10 +46,16 @@ export function OrderFileUpload({
     setProblem("");
     if (
       files.length > MAX_ORDER_FILES_PER_UPLOAD ||
-      files.some((file) => !checkOrderFile(file))
+      files.some(
+        (file) =>
+          !checkOrderFile(file) ||
+          (kind === "speaker-notes" && !/\.docx$/i.test(file.name)),
+      )
     ) {
       setProblem(
-        "Choose up to eight supported files, each no larger than 4 MB.",
+        kind === "speaker-notes"
+          ? "Choose up to eight Word (.docx) files, each no larger than 4 MB."
+          : "Choose up to eight supported files, each no larger than 4 MB.",
       );
       setUploads([]);
       if (fileInput.current) fileInput.current.value = "";
@@ -61,6 +67,13 @@ export function OrderFileUpload({
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || !kind || !uploads.length || missingPdf) return;
+    if (
+      kind === "speaker-notes" &&
+      uploads.some(({ file }) => !/\.docx$/i.test(file.name))
+    ) {
+      setProblem("Upload speaker notes as Word (.docx) files.");
+      return;
+    }
     setBusy(true);
     setProblem("");
     setNotice("");
@@ -144,7 +157,7 @@ export function OrderFileUpload({
           ref={fileInput}
           id="order-upload"
           type="file"
-          accept={orderFileAccept}
+          accept={kind === "speaker-notes" ? ".docx" : orderFileAccept}
           multiple
           disabled={busy || !kind}
           onChange={(event) =>

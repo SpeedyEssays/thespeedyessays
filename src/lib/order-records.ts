@@ -52,11 +52,13 @@ function toView(
     pages: row.pages,
     wordCount: row.wordCount,
     slideCount: row.slideCount,
+    speakerNotes: row.slideCount != null && row.extras.speakerNotes === true,
     dueAt: (row.agreedDueAt ?? row.dueAt).toISOString(),
     agreedDueAt: row.agreedDueAt?.toISOString() ?? null,
     placedAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     price: row.priceCents / 100,
+    priceAdjustment: row.priceAdjustment,
     paymentMethod: row.paymentMethod,
     checkoutStarted: !!row.paymentReference,
     paidAt: row.paidAt?.toISOString() ?? null,
@@ -131,6 +133,7 @@ export async function listAllOrders(
     clientName: order.clientName,
     awaitingReply: lastSender === 'client',
     detailsRevision: order.detailsRevision,
+    deadlineOption: order.deadlineOption,
   }))
 }
 

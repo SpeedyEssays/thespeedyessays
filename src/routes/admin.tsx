@@ -5,7 +5,7 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, CreditCard, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
+import { Bell, CreditCard, Gift, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
@@ -13,10 +13,12 @@ import { ChatThread } from '@/components/chat-thread'
 import { OrderPanel } from '@/components/order-panel'
 import { PortalShell } from '@/components/portal-shell'
 import { StaffAdmins } from '@/components/staff-admins'
+import { StaffCampaigns } from '@/components/staff-campaigns'
 import { StaffCustomerPresence } from '@/components/staff-customer-presence'
 import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
 import { StaffOrderEmail } from '@/components/staff-order-email'
+import { StaffOrderPrice } from '@/components/staff-order-price'
 import { StaffFeedback } from '@/components/staff-feedback'
 import { StaffNotifications } from '@/components/staff-notifications'
 import { StaffOrderStatus } from '@/components/staff-order-status'
@@ -31,6 +33,7 @@ import {
   sendSupportChat,
 } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
+import { listDiscountCodes } from '@/lib/discount-codes.functions'
 import { canCheckout, statusMeta, type AdminOrderView } from '@/lib/orders'
 import { listStaffOrders } from '@/lib/orders.functions'
 import { getMyStaffAvatar } from '@/lib/staff-avatar.functions'
@@ -42,7 +45,7 @@ import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
   tab: z
-    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'admins', 'payment-test', 'profile'])
+    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'campaigns', 'admins', 'payment-test', 'profile'])
     .optional()
     .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
@@ -57,6 +60,7 @@ const staffPages = [
   { key: 'customers', label: 'Customers', Icon: Users },
   { key: 'feedback', label: 'Feedback', Icon: Star },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
+  { key: 'campaigns', label: 'Campaigns', Icon: Gift },
   { key: 'profile', label: 'My profile', Icon: UserRound },
   { key: 'payment-test', label: 'Payment test', Icon: CreditCard },
   { key: 'admins', label: 'Admins', Icon: Shield },
@@ -85,6 +89,7 @@ export const Route = createFileRoute('/admin')({
       ? await listStaffOrders({ data: { customerId: deps.customer } })
       : [],
     avatarId: deps.tab === 'profile' ? await getMyStaffAvatar() : null,
+    discounts: deps.tab === 'campaigns' ? await listDiscountCodes() : [],
   }),
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({
@@ -98,7 +103,7 @@ export const Route = createFileRoute('/admin')({
 
 function Admin() {
   const { tab = 'chat', customer, chat, order, testRef } = Route.useSearch()
-  const { orders, avatarId } = Route.useLoaderData()
+  const { orders, avatarId, discounts } = Route.useLoaderData()
   const { canManageStaff, supportName } = Route.useRouteContext()
   useVisibleActivity(recordStaffActivity, Boolean(supportName))
   const { data: counts, refresh: refreshUnread } = useInboxData(getStaffInboxCounts)
@@ -148,6 +153,7 @@ function Admin() {
       )}
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
       {tab === 'feedback' && <StaffFeedback />}
+      {tab === 'campaigns' && <StaffCampaigns key={customer ?? 'all'} codes={discounts} customerId={customer} />}
       {tab === 'profile' && <StaffProfile avatarId={avatarId} supportName={supportName} />}
       {tab === 'payment-test' && <StaffPaymentTest key={testRef ?? 'new'} reference={testRef} />}
       {tab === 'notifications' && <StaffNotifications key={`${customer ?? ''}:${order ?? ''}`} customerId={customer} orderCode={order} />}
@@ -289,6 +295,10 @@ function StaffOrders({
               </div>
             </div>
             {canCheckout(order) && <StaffPaymentReminder code={order.code} />}
+            <StaffOrderPrice order={order} onSaved={async (message) => {
+              await router.invalidate()
+              setNotice(message)
+            }} />
             <StaffOrderStatus
               key={`${order.status}:${order.checkoutStarted}`}
               order={order}

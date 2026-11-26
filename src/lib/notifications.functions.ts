@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getDb } from "../../db";
 import { customerNotifications, orders } from "../../db/schema";
-import { findCustomerAccount } from "./customers.server";
+import { customerAccountSource, findCustomerAccount } from "./customers.server";
 import { requireAdmin, requireUser } from "./identity.functions";
 import { findAccessibleOrder } from "./order-records";
 import { canCheckout, orderCode, orderIdFromCode } from "./orders";
@@ -52,7 +52,8 @@ export const listMyNotifications = createServerFn({ method: "GET" })
         ...row,
         orderCode: order ? orderCode(order.id) : null,
         payment:
-          order && row.kind === "payment-reminder"
+          order &&
+          (row.kind === "payment-reminder" || row.kind === "price-offer")
             ? {
                 topic: order.topic,
                 amount: order.priceCents / 100,
@@ -198,3 +199,46 @@ export const sendCustomerNotification = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+export const broadcastCustomerNotification = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(
+    z.object({
+      requestId: z.uuid(),
+      kind: z.enum(notificationKinds),
+      title: z.string().trim().min(1).max(140),
+      body: z.string().trim().min(1).max(5000),
+    }),
+  )
+  .handler(({ data, context }) =>
+    getDb().transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext('speedyessays:notifications'), hashtext(${data.requestId}))`,
+      );
+      const {
+        rows: [previous],
+      } = await tx.execute<{ count: number; matches: boolean | null }>(sql`
+      select count(*)::int as count, bool_and(kind = ${data.kind} and title = ${data.title} and body = ${data.body}) as matches
+      from ${customerNotifications} where broadcast_id = ${data.requestId}::uuid
+    `);
+      if (previous.count) {
+        if (!previous.matches)
+          throw new Error(
+            "This announcement has changed. Review it and send again.",
+          );
+        return { count: previous.count };
+      }
+      const {
+        rows: [delivered],
+      } = await tx.execute<{ count: number }>(sql`
+      with sent as (
+        insert into ${customerNotifications} (broadcast_id, user_id, kind, title, body, sender_name)
+        select ${data.requestId}::uuid, customer.id, ${data.kind}, ${data.title}, ${data.body}, ${context.user.supportName}
+        from (${customerAccountSource()}) customer
+        returning id
+      )
+      select count(*)::int as count from sent
+    `);
+      return { count: delivered.count };
+    }),
+  );

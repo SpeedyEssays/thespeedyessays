@@ -47,6 +47,9 @@ export const uploadOrderFile = createServerFn({ method: 'POST' })
     if (data.kind !== 'brief' && !context.user.isAdmin) {
       throw new Error('Only staff can upload deliverables.')
     }
+    if (data.kind === 'speaker-notes' && !/\.docx$/i.test(data.file.name)) {
+      throw new Error('Upload speaker notes as a Word (.docx) document.')
+    }
     const needsPreview = fileRequiresApproval(data.kind)
     if (needsPreview && !data.preview) {
       throw new Error('Prepare a watermarked PDF preview before uploading this file.')

@@ -6,7 +6,6 @@ import {
   orderLanguages,
   orderSoftware,
   orderSoftwareIds,
-  SOFTWARE_FEE_CENTS,
   type OrderLanguage,
   type SoftwareSelection,
 } from "@/lib/order-requirements";
@@ -51,6 +50,7 @@ export function OrderSoftwareField({
   details,
   error,
   disabled,
+  fee,
 }: {
   id: string;
   value: SoftwareSelection;
@@ -58,6 +58,7 @@ export function OrderSoftwareField({
   details?: { value: string; onChange: (value: string) => void };
   error?: string;
   disabled?: boolean;
+  fee: number;
 }) {
   return (
     <fieldset disabled={disabled} className="min-w-0 space-y-3">
@@ -116,7 +117,7 @@ export function OrderSoftwareField({
       <p className="text-xs text-muted-foreground">
         {disabled
           ? "The software selection is locked once checkout starts."
-          : `Software work adds ${formatUSD(SOFTWARE_FEE_CENTS / 100)} USD per order.`}
+          : `Software work adds ${formatUSD(fee)} USD per order.`}
       </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">

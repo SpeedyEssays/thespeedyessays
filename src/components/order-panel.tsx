@@ -131,6 +131,7 @@ export function OrderPanel({
           <p className="mt-1 text-sm">{orderServices[order.service].label}</p>
         )}
         {order.language && <p className="mt-1 text-sm">Language · {orderLanguages[order.language]}</p>}
+        {order.speakerNotes && <p className="mt-1 text-sm">Speaker notes · Separate Word document</p>}
         {order.software && (
           <p className="mt-1 break-words text-sm">
             Software · {order.softwareDetails || orderSoftware[order.software]}
@@ -138,6 +139,9 @@ export function OrderPanel({
           </p>
         )}
         <p className="mt-1 text-sm">
+          {order.priceAdjustment && (
+            <del className="mr-2 text-muted-foreground">{formatUSD(order.priceAdjustment.originalCents / 100)}</del>
+          )}
           {formatUSD(order.price)} USD ·{' '}
           {!staff &&
           order.status === 'awaiting-payment' &&

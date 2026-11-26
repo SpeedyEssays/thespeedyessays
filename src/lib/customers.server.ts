@@ -10,8 +10,8 @@ type AccountRow = {
   displayName: string | null
 }
 
-async function findAccounts(query: string, id?: string) {
-  const accounts = useSupabase
+export function customerAccountSource() {
+  return useSupabase
     ? sql`select id::text as id, email,
           left(nullif(trim(raw_user_meta_data->>'full_name'), ''), 100) as name
         from auth.users
@@ -19,9 +19,12 @@ async function findAccounts(query: string, id?: string) {
           and not (coalesce(raw_app_meta_data->'roles', '[]'::jsonb) ? 'admin')`
     : sql`select distinct on (user_id) user_id as id, client_email as email, client_name as name
         from public.orders order by user_id, id desc`
+}
+
+async function findAccounts(query: string, id?: string) {
   const result = await getDb().execute<AccountRow>(sql`
     select account.id, account.email, account.name as "accountName", profile.display_name as "displayName"
-    from (${accounts}) account
+    from (${customerAccountSource()}) account
     left join public.customer_profiles profile on profile.user_id = account.id
     where ${
       id

@@ -3,8 +3,9 @@ import { and, desc, eq, exists, inArray, isNotNull, isNull, lte, sql } from 'dri
 import { z } from 'zod'
 
 import { getDb } from '../../db'
-import { customerNotifications, orderFiles, orderMessages, orders, staffAvatars } from '../../db/schema'
+import { customerNotifications, discountCodes, orderFiles, orderMessages, orders, staffAvatars } from '../../db/schema'
 import { readCustomerProfile } from './customers.server'
+import { discountCodeInput, inactiveDiscountMessage, minimumDiscountMessage } from './discount-codes'
 import { requireAdmin, requireUser } from './identity.functions'
 import {
   findAccessibleOrder,
@@ -15,13 +16,14 @@ import {
   MAX_SOFTWARE_DETAILS,
   orderLanguageIds,
   orderSoftwareIds,
-  SOFTWARE_FEE_CENTS,
 } from './order-requirements'
 import {
   approvalFileKinds,
   canChangeUnpaidQuote,
+  canCheckout,
   customerRevisionStatus,
   orderCode,
+  orderIdFromCode,
   orderRevisionDeadline,
   orderStatuses,
   staffOrderStatuses,
@@ -32,13 +34,17 @@ import {
   academicLevels,
   assignmentTypes,
   deadlines,
+  discountedTotalCents,
   estimatePrice,
+  formatUSD,
   formattingStyles,
   MAX_ORDER_PAGES,
   MAX_ORDER_SLIDES,
   MAX_ORDER_WORDS,
+  MIN_CHECKOUT_CENTS,
   orderServiceIds,
   PRESENTATION_TYPE,
+  softwareWorkFee,
 } from './pricing'
 import { supportNameRequired } from './support-name'
 
@@ -64,7 +70,9 @@ const createOrderInput = z.object({
     topWriter: z.boolean().optional(),
     draftPreview: z.boolean().optional(),
     abstractPage: z.boolean().optional(),
+    speakerNotes: z.boolean().optional(),
   }),
+  discountCode: discountCodeInput.optional(),
   instructions: z.string().max(20000),
   submissionId: z.uuid(),
   agree: z.literal(true),
@@ -103,54 +111,57 @@ export const createOrder = createServerFn({ method: 'POST' })
     })
 
     const profile = await readCustomerProfile(context.user.id)
-    const [row] = await getDb()
-      .insert(orders)
-      .values({
-        userId: context.user.id,
-        submissionId: data.submissionId,
-        clientEmail: context.user.email,
-        clientName: profile.displayName ?? context.user.name,
-        type: data.type,
-        service: data.service,
-        language: data.language,
-        software: data.software,
-        softwareDetails: data.software === 'other' ? data.softwareDetails : null,
-        softwareFeeCents: Math.round(quote.softwareFee * 100),
-        subject: data.subject,
-        topic: data.topic,
-        level: level.label,
-        style: data.style,
-        sources: data.sources,
-        pages: quote.pages,
-        wordCount: data.wordCount,
-        slideCount: quote.slideCount,
-        deadlineOption: deadline.id,
-        dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
-        extras: data.extras,
-        instructions: data.instructions.trim(),
-        paymentMethod: 'paystack',
-        priceCents: Math.round(quote.total * 100),
-      })
-      .onConflictDoNothing({ target: orders.submissionId })
-      .returning()
-
-    const [existing] = row
-      ? []
-      : await getDb()
-          .select()
-          .from(orders)
-          .where(
-            and(
-              eq(orders.submissionId, data.submissionId),
-              eq(orders.userId, context.user.id),
-            ),
-          )
-    const saved = row ?? existing
-    if (!saved)
-      throw new Error(
-        'Could not save the order. Start a new order and try again.',
-      )
-    return { code: orderCode(saved.id) }
+    const originalCents = Math.round(quote.total * 100)
+    return getDb().transaction(async (tx) => {
+      const submittedOrder = and(eq(orders.submissionId, data.submissionId), eq(orders.userId, context.user.id))
+      let discount: { code: string; percent: number } | undefined
+      if (data.discountCode) {
+        [discount] = await tx.select({ code: discountCodes.code, percent: discountCodes.percent })
+          .from(discountCodes)
+          .where(and(eq(discountCodes.code, data.discountCode), eq(discountCodes.active, true)))
+          .for('share')
+        const [prior] = await tx.select({ id: orders.id }).from(orders).where(submittedOrder)
+        if (prior) return { code: orderCode(prior.id) }
+        if (!discount) throw new Error(inactiveDiscountMessage)
+      }
+      const priceCents = discount ? discountedTotalCents(originalCents, discount.percent) : originalCents
+      if (discount && priceCents < MIN_CHECKOUT_CENTS) throw new Error(minimumDiscountMessage)
+      const [row] = await tx
+        .insert(orders)
+        .values({
+          userId: context.user.id,
+          submissionId: data.submissionId,
+          clientEmail: context.user.email,
+          clientName: profile.displayName ?? context.user.name,
+          type: data.type,
+          service: data.service,
+          language: data.language,
+          software: data.software,
+          softwareDetails: data.software === 'other' ? data.softwareDetails : null,
+          softwareFeeCents: Math.round(quote.softwareFee * 100),
+          subject: data.subject,
+          topic: data.topic,
+          level: level.label,
+          style: data.style,
+          sources: data.sources,
+          pages: quote.pages,
+          wordCount: data.wordCount,
+          slideCount: quote.slideCount,
+          deadlineOption: deadline.id,
+          dueAt: new Date(Date.now() + deadline.hours * 3600 * 1000),
+          extras: { ...data.extras, speakerNotes: quote.speakerNotesFee > 0 ? true : undefined },
+          instructions: data.instructions.trim(),
+          paymentMethod: 'paystack',
+          priceCents,
+          priceAdjustment: discount && { kind: 'discount-code', originalCents, ...discount },
+        })
+        .onConflictDoNothing({ target: orders.submissionId })
+        .returning()
+      if (row) return { code: orderCode(row.id) }
+      const [existing] = await tx.select({ id: orders.id }).from(orders).where(submittedOrder)
+      if (!existing) throw new Error('Could not save the order. Start a new order and try again.')
+      return { code: orderCode(existing.id) }
+    })
   })
 
 export const listMyOrders = createServerFn({ method: 'GET' })
@@ -163,6 +174,53 @@ export const listStaffOrders = createServerFn({ method: 'GET' })
     z.object({ customerId: z.string().min(1).max(128).optional() }).optional(),
   )
   .handler(({ data }) => listAllOrders(data?.customerId))
+
+export const offerOrderPrice = createServerFn({ method: 'POST' })
+  .middleware([requireAdmin])
+  .validator(z.object({
+    code: z.string().max(20),
+    expectedCents: z.number().int().positive(),
+    priceCents: z.number().int().min(MIN_CHECKOUT_CENTS).max(2147483647),
+    requestId: z.uuid(),
+  }))
+  .handler(({ data, context }) => {
+    const id = orderIdFromCode(data.code)
+    if (!id) throw new Error('Order not found.')
+    return getDb().transaction(async (tx) => {
+      const [order] = await tx.select().from(orders).where(eq(orders.id, id)).for('update')
+      if (!order) throw new Error('Order not found.')
+      const [sent] = await tx.select({ id: customerNotifications.id }).from(customerNotifications).where(and(
+        eq(customerNotifications.id, data.requestId),
+        eq(customerNotifications.userId, order.userId),
+        eq(customerNotifications.orderId, id),
+        eq(customerNotifications.kind, 'price-offer'),
+      ))
+      if (sent) return { ok: true }
+      if (!canCheckout(order) || order.paymentReference)
+        throw new Error('This offer is available for unpaid orders before checkout opens.')
+      if (order.priceCents !== data.expectedCents)
+        throw new Error('The order total has changed. Refresh the order before sending an offer.')
+      if (data.priceCents >= order.priceCents)
+        throw new Error('Enter a price lower than the current total.')
+
+      await tx.update(orders).set({
+        priceCents: data.priceCents,
+        priceAdjustment: { kind: 'special-price', originalCents: order.priceAdjustment?.originalCents ?? order.priceCents },
+        detailsRevision: sql`${orders.detailsRevision} + 1`,
+        updatedAt: sql`now()`,
+      }).where(eq(orders.id, id))
+      await tx.insert(customerNotifications).values({
+        id: data.requestId,
+        userId: order.userId,
+        orderId: id,
+        kind: 'price-offer',
+        title: `🎉 Special price for ${orderCode(id)}`,
+        body: `Congratulations! Your total has dropped from ${formatUSD(order.priceCents / 100)} USD to ${formatUSD(data.priceCents / 100)} USD.`,
+        senderName: context.user.supportName,
+      })
+      return { ok: true }
+    })
+  })
 
 export const updateOrderStatus = createServerFn({ method: 'POST' })
   .middleware([requireAdmin])
@@ -291,8 +349,16 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
       checkoutStarted: Boolean(order.paymentReference),
     })) throw new Error('The software selection is locked once checkout starts.')
     const softwareFeeCents = nextSoftware
-      ? order.software ? order.softwareFeeCents : SOFTWARE_FEE_CENTS
+      ? nextSoftware === order.software ? order.softwareFeeCents : Math.round(softwareWorkFee(order.level, order.deadlineOption) * 100)
       : 0
+    const priceAdjustment = order.priceAdjustment
+    const quoteChange = softwareFeeCents - order.softwareFeeCents
+    const originalCents = (priceAdjustment?.originalCents ?? order.priceCents) + quoteChange
+    const priceCents = priceAdjustment?.kind === 'special-price' ? order.priceCents
+      : priceAdjustment?.kind === 'discount-code' ? discountedTotalCents(originalCents, priceAdjustment.percent)
+        : originalCents
+    if (softwareChanged && priceAdjustment?.kind === 'discount-code' && priceCents < MIN_CHECKOUT_CENTS)
+      throw new Error(minimumDiscountMessage)
     const deadline = agreedDueAt ? new Date(agreedDueAt) : null
     if (deadline && !Number.isFinite(deadline.getTime()))
       throw new Error('Choose a valid deadline.')
@@ -319,7 +385,8 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
             software: nextSoftware,
             softwareDetails: nextSoftwareDetails,
             softwareFeeCents,
-            priceCents: order.priceCents - order.softwareFeeCents + softwareFeeCents,
+            priceCents,
+            ...(priceAdjustment?.kind === 'discount-code' ? { priceAdjustment: { ...priceAdjustment, originalCents } } : {}),
           } : {}),
           agreedDueAt: deadline,
           detailsRevision: sql`${orders.detailsRevision} + 1`,

@@ -41,8 +41,8 @@ describe("order estimates", () => {
         extras: { topWriter: true },
         software: "spss",
       });
-      expect(technical.softwareFee).toBe(4);
-      expect(technical.total).toBeCloseTo(standard.total + 4, 2);
+      expect(technical.softwareFee).toBe(55);
+      expect(technical.total).toBeCloseTo(standard.total + 55, 2);
       expect(technical.extras).toBe(standard.extras);
     }
   });
@@ -95,8 +95,8 @@ describe("order estimates", () => {
     expect(estimatePrice({ ...base, ...quoteLength(length) })).toMatchObject({
       slideCount: 600,
       pages: 0,
-      perSlide: 4.8,
-      total: 2880,
+      perSlide: 5.9,
+      total: 3540,
     });
     expect(
       estimatePrice({
@@ -104,14 +104,14 @@ describe("order estimates", () => {
         deadline: "7d",
         ...quoteLength(length),
       }),
-    ).toMatchObject({ perSlide: 5.38, total: 3228 });
+    ).toMatchObject({ perSlide: 6.61, total: 3966 });
     expect(
       estimatePrice({
         ...base,
         service: "proofreading",
         slideCount: 1,
       }).total,
-    ).toBe(3.12);
+    ).toBe(3.84);
     expect(formatOrderLength(0, null, 600)).toBe("600 slides");
     expect(parseOrderLength(MAX_ORDER_SLIDES, "slides")).toBe(MAX_ORDER_SLIDES);
     expect(parseOrderLength(MAX_ORDER_SLIDES + 1, "slides")).toBeUndefined();
@@ -119,6 +119,41 @@ describe("order estimates", () => {
       unit: "pages",
       amount: "600",
     });
+  });
+
+  it.each([
+    ["high-school", 3.7, 40],
+    ["undergraduate", 5.9, 55],
+    ["masters", 8.9, 70],
+    ["phd", 13.3, 85],
+  ] as const)(
+    "uses the 14-day slide and software rates for %s",
+    (level, perSlide, softwareFee) => {
+      expect(
+        estimatePrice({ ...base, level, software: "python", slideCount: 1 }),
+      ).toMatchObject({ perSlide, softwareFee });
+    },
+  );
+
+  it("adds a single $10 speaker notes document and applies the discount to the subtotal", () => {
+    expect(
+      estimatePrice({
+        ...base,
+        level: "high-school",
+        slideCount: 10,
+        extras: { speakerNotes: true },
+        discountPercent: 10,
+      }),
+    ).toMatchObject({
+      perSlide: 3.7,
+      speakerNotesFee: 10,
+      subtotal: 47,
+      discount: 4.7,
+      total: 42.3,
+    });
+    expect(
+      estimatePrice({ ...base, extras: { speakerNotes: true } }),
+    ).toMatchObject({ speakerNotesFee: 0, total: 8 });
   });
 
   it("includes the new formats and retains legacy assignment values", () => {

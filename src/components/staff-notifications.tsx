@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -6,13 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  getStaffCustomer,
-  listStaffCustomers,
-} from "@/lib/customers.functions";
-import { sendCustomerNotification } from "@/lib/notifications.functions";
+  StaffCustomerPicker,
+  type StaffRecipient,
+} from "@/components/staff-customer-picker";
+import {
+  broadcastCustomerNotification,
+  sendCustomerNotification,
+} from "@/lib/notifications.functions";
 import { notificationKinds } from "@/lib/portal-notifications";
 
-type Recipient = Awaited<ReturnType<typeof listStaffCustomers>>[number];
 type ManualNotificationKind = (typeof notificationKinds)[number];
 
 export function StaffNotifications({
@@ -22,12 +24,8 @@ export function StaffNotifications({
   customerId?: string;
   orderCode?: string;
 }) {
-  const [query, setQuery] = useState("");
-  const [accounts, setAccounts] = useState<Recipient[] | null>(null);
-  const [recipient, setRecipient] = useState<Recipient | null>(null);
-  const [loadingRecipient, setLoadingRecipient] = useState(Boolean(customerId));
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState("");
+  const [allCustomers, setAllCustomers] = useState(false);
+  const [recipient, setRecipient] = useState<StaffRecipient | null>(null);
   const [kind, setKind] = useState<ManualNotificationKind>("notice");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -35,66 +33,50 @@ export function StaffNotifications({
   const [notice, setNotice] = useState("");
   const [problem, setProblem] = useState("");
   const lastRequest = useRef<{ payload: string; id: string } | null>(null);
-  const linkedOrder = recipient?.id === customerId ? orderCode : undefined;
-
-  useEffect(() => {
-    if (!customerId) return;
-    let active = true;
-    void getStaffCustomer({ data: customerId })
-      .then(
-        (account) => {
-          if (active) setRecipient((current) => current ?? account);
-        },
-        () => {
-          if (active)
-            setSearchError(
-              "The selected account couldn’t load. Search for the customer below.",
-            );
-        },
-      )
-      .finally(() => {
-        if (active) setLoadingRecipient(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [customerId]);
-
-  async function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (searching) return;
-    setSearching(true);
-    setSearchError("");
-    try {
-      setAccounts(await listStaffCustomers({ data: { query } }));
-    } catch {
-      setSearchError("Customer accounts couldn’t load. Try again.");
-    } finally {
-      setSearching(false);
-    }
-  }
+  const linkedOrder =
+    !allCustomers && recipient?.id === customerId ? orderCode : undefined;
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !recipient || !title.trim() || !body.trim()) return;
+    if (busy || (!allCustomers && !recipient) || !title.trim() || !body.trim())
+      return;
     const data = {
-      userId: recipient.id,
       kind,
       title: title.trim(),
       body: body.trim(),
-      orderCode: linkedOrder,
     };
-    const payload = JSON.stringify(data);
+    const payload = JSON.stringify({
+      ...data,
+      audience: allCustomers ? "all" : recipient?.id,
+      orderCode: linkedOrder,
+    });
     if (lastRequest.current?.payload !== payload)
       lastRequest.current = { payload, id: crypto.randomUUID() };
     setBusy(true);
     setProblem("");
     setNotice("");
     try {
-      await sendCustomerNotification({
-        data: { ...data, requestId: lastRequest.current.id },
-      });
-      setNotice(`Sent to ${recipient.email} in the customer portal.`);
+      const requestId = lastRequest.current.id;
+      if (allCustomers) {
+        const { count } = await broadcastCustomerNotification({
+          data: { ...data, requestId },
+        });
+        setNotice(
+          count === 0
+            ? "There are no customer accounts to notify."
+            : `Sent to ${count.toLocaleString("en-US")} ${count === 1 ? "customer" : "customers"} in the portal.`,
+        );
+      } else if (recipient) {
+        await sendCustomerNotification({
+          data: {
+            ...data,
+            requestId,
+            userId: recipient.id,
+            orderCode: linkedOrder,
+          },
+        });
+        setNotice(`Sent to ${recipient.email} in the customer portal.`);
+      }
       setTitle("");
       setBody("");
       lastRequest.current = null;
@@ -119,81 +101,48 @@ export function StaffNotifications({
           Send a notification
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Send an update or offer to a customer’s Notifications &amp; offers
-          inbox.
+          Send an update or offer to one customer or to all customer inboxes.
         </p>
       </header>
       <div className="space-y-5 p-5 sm:p-6">
-        <form
-          className="flex items-end gap-2"
-          onSubmit={(event) => void search(event)}
-        >
-          <div className="min-w-0 flex-1 space-y-2">
-            <Label htmlFor="recipient-search">Find a customer</Label>
-            <Input
-              id="recipient-search"
-              type="search"
-              placeholder="Name or email"
-              maxLength={200}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
+        <fieldset disabled={busy} className="flex flex-wrap gap-3">
+          <legend className="mb-2 text-sm font-medium">Recipients</legend>
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <input
+              name="notification-audience"
+              type="radio"
+              checked={!allCustomers}
+              onChange={() => setAllCustomers(false)}
             />
-          </div>
-          <Button type="submit" variant="outline" disabled={searching || busy}>
-            {searching ? "Searching…" : "Search"}
-          </Button>
-        </form>
-        {searchError && (
-          <p role="alert" className="text-sm text-destructive">
-            {searchError}
-          </p>
-        )}
-        {accounts?.length === 0 && (
-          <p role="status" className="text-sm text-muted-foreground">
-            No customers match this search.
-          </p>
-        )}
-        {accounts && accounts.length > 0 && (
-          <div className="space-y-2">
-            <Label htmlFor="notice-recipient">Customer search results</Label>
-            <select
-              id="notice-recipient"
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={
-                accounts.some((account) => account.id === recipient?.id)
-                  ? recipient?.id
-                  : ""
-              }
-              onChange={(event) =>
-                setRecipient(
-                  accounts.find(
-                    (account) => account.id === event.target.value,
-                  ) ?? null,
-                )
-              }
-              disabled={busy}
-            >
-              <option value="">Choose a customer</option>
-              {accounts.map((account) => {
-                const name = account.displayName || account.accountName;
-                return (
-                  <option key={account.id} value={account.id}>
-                    {name ? `${name} · ${account.email}` : account.email}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+            One customer
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <input
+              name="notification-audience"
+              type="radio"
+              checked={allCustomers}
+              onChange={() => setAllCustomers(true)}
+            />
+            All customers
+          </label>
+        </fieldset>
+        {!allCustomers && (
+          <StaffCustomerPicker
+            recipient={recipient}
+            setRecipient={setRecipient}
+            customerId={customerId}
+            disabled={busy}
+          />
         )}
         <form
           className="space-y-4 border-t pt-5"
           onSubmit={(event) => void send(event)}
         >
           <p className="break-words text-sm font-medium">
-            {recipient
-              ? `To ${recipient.email}`
-              : loadingRecipient
-                ? "Loading selected customer…"
+            {allCustomers
+              ? "To all customer accounts · Portal notification"
+              : recipient
+                ? `To ${recipient.email}`
                 : "Choose a recipient to send a notification."}
             {linkedOrder && (
               <span className="ml-2 text-muted-foreground">
@@ -240,14 +189,21 @@ export function StaffNotifications({
           </fieldset>
           <Button
             type="submit"
-            disabled={busy || !recipient || !title.trim() || !body.trim()}
+            disabled={
+              busy ||
+              (!allCustomers && !recipient) ||
+              !title.trim() ||
+              !body.trim()
+            }
           >
             <Send />{" "}
             {busy
               ? "Sending…"
-              : kind === "offer"
-                ? "Send offer"
-                : "Send notification"}
+              : allCustomers
+                ? "Send to all customers"
+                : kind === "offer"
+                  ? "Send offer"
+                  : "Send notification"}
           </Button>
           {notice && (
             <p

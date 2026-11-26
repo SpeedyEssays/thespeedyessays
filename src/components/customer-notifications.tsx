@@ -125,11 +125,9 @@ function NotificationPage({
         <ul className="space-y-3">
           {data.entries.map((entry) => {
             const paymentReminder = entry.kind === "payment-reminder";
-            const Icon = paymentReminder
-              ? CreditCard
-              : entry.kind === "offer"
-                ? Gift
-                : Bell;
+            const priceOffer = entry.kind === "price-offer";
+            const offer = priceOffer || entry.kind === "offer";
+            const Icon = paymentReminder ? CreditCard : offer ? Gift : Bell;
             return (
               <li
                 key={entry.id}
@@ -143,7 +141,7 @@ function NotificationPage({
                 <div
                   className={cn(
                     "grid size-9 shrink-0 place-items-center rounded-lg",
-                    entry.kind === "offer" ? "bg-accent/30" : "bg-muted",
+                    offer ? "bg-accent/30" : "bg-muted",
                   )}
                 >
                   <Icon aria-hidden="true" className="size-4" />
@@ -151,11 +149,13 @@ function NotificationPage({
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="font-semibold text-foreground">
-                      {paymentReminder
-                        ? "Payment reminder"
-                        : entry.kind === "offer"
-                          ? "Offer"
-                          : "Update"}
+                      {priceOffer
+                        ? "Special price"
+                        : paymentReminder
+                          ? "Payment reminder"
+                          : entry.kind === "offer"
+                            ? "Offer"
+                            : "Update"}
                     </span>
                     {!entry.readAt && (
                       <span className="rounded-full bg-primary px-2 py-0.5 font-medium text-primary-foreground">
@@ -170,6 +170,11 @@ function NotificationPage({
                   {entry.payment ? (
                     <div className="space-y-1 text-sm">
                       <p className="break-words">{entry.payment.topic}</p>
+                      {priceOffer && (
+                        <p className="whitespace-pre-wrap break-words">
+                          {entry.body}
+                        </p>
+                      )}
                       <p className="font-medium">
                         {entry.payment.paid
                           ? "Payment confirmed"

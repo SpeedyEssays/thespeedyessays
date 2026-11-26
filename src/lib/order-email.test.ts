@@ -2,6 +2,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { canSendDeliveryEmail, orderEmailKinds } from "./order-email";
+import { renderOfferEmail } from "./offer-email.server";
 import {
   checkGmailConnection,
   orderEmailConfig,
@@ -27,6 +28,27 @@ const delivery = {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+it("renders a branded offer with a working discount link and escaped copy", () => {
+  const { subject, text, html } = renderOfferEmail(
+    {
+      headline: "Slides & speaker notes",
+      message:
+        "Dear Customer,\n\nUse this offer for your next order.\n<script>danger</script>",
+      discount: { code: "PRESENT10", percent: 10 },
+    },
+    config.origin,
+  );
+  expect(subject).toBe("SpeedyEssays · Slides & speaker notes");
+  expect(html).toContain("Slides &amp; speaker notes");
+  expect(html).toContain(
+    'href="https://orders.example.test/order?discount=PRESENT10"',
+  );
+  expect(html).toContain("10% off your order");
+  expect(html).toContain("&lt;script&gt;");
+  expect(html).not.toContain("<script>");
+  expect(text.match(/Dear Customer,/g)).toHaveLength(1);
 });
 
 describe("order email", () => {

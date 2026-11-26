@@ -12,7 +12,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
-import type { OrderService } from '../src/lib/pricing'
+import type { Extras, OrderService, PriceAdjustment } from '../src/lib/pricing'
 import type { OrderLanguage, OrderSoftware } from '../src/lib/order-requirements'
 import type { NotificationKind } from '../src/lib/portal-notifications'
 
@@ -50,17 +50,11 @@ export const orders = pgTable(
     dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
     agreedDueAt: timestamp('agreed_due_at', { withTimezone: true }),
     detailsRevision: integer('details_revision').notNull().default(0),
-    extras: jsonb()
-      .$type<{
-        topWriter?: boolean
-        draftPreview?: boolean
-        abstractPage?: boolean
-      }>()
-      .notNull()
-      .default({}),
+    extras: jsonb().$type<Extras>().notNull().default({}),
     instructions: text().notNull().default(''),
     paymentMethod: text('payment_method').notNull(),
     priceCents: integer('price_cents').notNull(),
+    priceAdjustment: jsonb('price_adjustment').$type<PriceAdjustment>(),
     status: text().notNull().default('awaiting-payment'),
     originalityScore: integer('originality_score'),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -102,6 +96,7 @@ export const customerNotifications = pgTable.withRLS(
   {
     id: uuid().primaryKey().defaultRandom(),
     userId: text('user_id').notNull(),
+    broadcastId: uuid('broadcast_id'),
     orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
     kind: text().$type<NotificationKind>().notNull(),
     title: text().notNull(),
@@ -113,12 +108,23 @@ export const customerNotifications = pgTable.withRLS(
     readAt: timestamp('read_at', { withTimezone: true }),
   },
   (t) => [
-    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer', 'payment-reminder')`),
+    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer', 'payment-reminder', 'price-offer')`),
+    index('customer_notifications_broadcast_idx').on(t.broadcastId).where(sql`${t.broadcastId} is not null`),
     index('customer_notifications_user_sent_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
     index('customer_notifications_unread_idx').on(t.userId).where(sql`${t.readAt} is null`),
     index('customer_notifications_order_idx').on(t.orderId),
   ],
 )
+
+export const discountCodes = pgTable.withRLS('discount_codes', {
+  code: text().primaryKey(),
+  percent: integer().notNull(),
+  active: boolean().notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('discount_codes_percent_valid', sql`${t.percent} between 1 and 99`),
+  check('discount_codes_format_valid', sql`${t.code} ~ '^[A-Z0-9][A-Z0-9_-]{2,31}$'`),
+])
 
 export const orderFiles = pgTable(
   'order_files',

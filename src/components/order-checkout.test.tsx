@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { PricingCalculator } from "@/components/site/pricing-calculator";
 import {
   afterAll,
   afterEach,
@@ -15,13 +16,14 @@ const stubs = vi.hoisted(() => ({
   checkout: true,
   createOrder: vi.fn(),
   startCheckout: vi.fn(),
+  lookupDiscountCode: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({
     options,
     useSearch: () => ({ pages: 1 }),
-    useLoaderData: () => stubs.checkout,
+    useLoaderData: () => ({ checkout: stubs.checkout, discount: null }),
     useRouteContext: () => ({ user: { email: "customer@example.test" } }),
   }),
   Link: ({
@@ -44,6 +46,9 @@ vi.mock("@/components/portal-shell", () => ({
 vi.mock("@/lib/identity.functions", () => ({ getServerUser: vi.fn() }));
 vi.mock("@/lib/files.functions", () => ({ uploadOrderFile: vi.fn() }));
 vi.mock("@/lib/orders.functions", () => ({ createOrder: stubs.createOrder }));
+vi.mock("@/lib/discount-codes.functions", () => ({
+  lookupDiscountCode: stubs.lookupDiscountCode,
+}));
 vi.mock("@/lib/payments.functions", () => ({
   isCheckoutAvailable: vi.fn(),
   startCheckout: stubs.startCheckout,
@@ -81,6 +86,7 @@ beforeEach(() => {
   stubs.checkout = true;
   stubs.createOrder.mockReset().mockResolvedValue({ code });
   stubs.startCheckout.mockReset().mockResolvedValue({ url: "#test-checkout" });
+  stubs.lookupDiscountCode.mockReset();
   window.location.hash = "";
 });
 
@@ -150,3 +156,37 @@ it.each([
     expect(stubs.startCheckout).not.toHaveBeenCalled();
   },
 );
+
+it("makes slides visible immediately and discounts the speaker-notes quote", async () => {
+  const user = userEvent.setup();
+  stubs.lookupDiscountCode.mockResolvedValue({ code: "SAVE10", percent: 10 });
+  render(<PricingCalculator />);
+  await user.click(screen.getByRole("button", { name: "High School" }));
+  await user.click(screen.getByRole("button", { name: "14 days" }));
+  await user.click(screen.getByRole("button", { name: "Slides" }));
+  expect(screen.getByLabelText("Type of assignment")).toHaveValue(
+    "Presentation / Slides",
+  );
+  expect(screen.getByText("$11.10", { exact: true })).toBeInTheDocument();
+  await user.click(screen.getByRole("checkbox", { name: /Speaker notes/ }));
+  expect(screen.getByText("$21.10", { exact: true })).toBeInTheDocument();
+  await user.type(screen.getByLabelText("Discount code"), "save10");
+  await user.click(screen.getByRole("button", { name: "Apply" }));
+  expect(
+    await screen.findByText("$18.99", { exact: true }),
+  ).toBeInTheDocument();
+  expect(stubs.lookupDiscountCode).toHaveBeenCalledWith({ data: "SAVE10" });
+});
+
+it("passes the code from the order summary to the server when saving", async () => {
+  stubs.lookupDiscountCode.mockResolvedValue({ code: "SAVE10", percent: 10 });
+  const user = await reviewOrder();
+  await user.type(screen.getByLabelText("Discount code"), "save10");
+  await user.click(screen.getByRole("button", { name: "Apply" }));
+  await screen.findByText("SAVE10");
+  await user.click(screen.getByRole("button", { name: "Save and pay later" }));
+  await screen.findByRole("heading", { name: `Order ${code} saved` });
+  expect(stubs.createOrder).toHaveBeenCalledWith({
+    data: expect.objectContaining({ discountCode: "SAVE10" }),
+  });
+});

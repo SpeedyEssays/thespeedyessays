@@ -7,6 +7,7 @@ import { OrderLanguageField, OrderSoftwareField } from '@/components/order-requi
 import { selectedSoftware, softwareSelectionError, type OrderLanguage, type SoftwareSelection } from '@/lib/order-requirements'
 import { updateStaffOrderDetails } from '@/lib/orders.functions'
 import { canChangeUnpaidQuote, type AdminOrderView } from '@/lib/orders'
+import { softwareWorkFee } from '@/lib/pricing'
 
 export function StaffOrderDetails({
   order,
@@ -128,6 +129,7 @@ export function StaffOrderDetails({
           onChange={setSoftware}
           details={{ value: softwareDetails, onChange: setSoftwareDetails }}
           disabled={!editSoftware}
+          fee={software === order.software ? order.softwareFeeCents / 100 : softwareWorkFee(order.level, order.deadlineOption)}
         />
         <div className="space-y-2">
           <Label htmlFor="staff-instructions">Instructions</Label>

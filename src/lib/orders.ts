@@ -1,7 +1,7 @@
 // Order vocabulary shared by the client dashboard, the admin console and the
 // server functions that persist orders.
 
-import type { OrderService } from './pricing'
+import type { OrderService, PriceAdjustment } from './pricing'
 import type { OrderLanguage, OrderSoftware } from './order-requirements'
 
 export const orderStatuses = [
@@ -46,6 +46,7 @@ export const staffFileKinds = [
   'final',
   'paper',
   'soft-copy',
+  'speaker-notes',
   'report',
   'material',
 ] as const
@@ -57,11 +58,12 @@ export const fileKindLabels: Record<FileKind, string> = {
   paper: 'Draft',
   final: 'Final copy',
   'soft-copy': 'Soft copy',
+  'speaker-notes': 'Speaker notes (Word)',
   report: 'Originality report',
   material: 'Supporting file',
 }
 
-export const approvalFileKinds = ['final', 'soft-copy'] as const
+export const approvalFileKinds = ['final', 'soft-copy', 'speaker-notes'] as const
 
 export function fileRequiresApproval(kind: string) {
   return approvalFileKinds.some((type) => type === kind)
@@ -168,11 +170,13 @@ export type OrderView = {
   pages: number
   wordCount: number | null
   slideCount: number | null
+  speakerNotes: boolean
   dueAt: string
   agreedDueAt: string | null
   placedAt: string
   updatedAt: string
   price: number
+  priceAdjustment: PriceAdjustment | null
   paymentMethod: string
   paidAt: string | null
   deliveredAt: string | null
@@ -193,6 +197,7 @@ export type AdminOrderView = OrderView & {
   clientName: string | null
   awaitingReply: boolean
   detailsRevision: number
+  deadlineOption: string
 }
 
 export type OrderMessageView = {

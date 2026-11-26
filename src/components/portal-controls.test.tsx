@@ -9,6 +9,7 @@ import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
 import { StaffNotifications } from "./staff-notifications";
+import { StaffOrderPrice } from "./staff-order-price";
 import { StaffOrderStatus } from "./staff-order-status";
 import { StaffPaymentReminder } from "./staff-payment-reminder";
 
@@ -18,6 +19,8 @@ const stubs = vi.hoisted(() => ({
   listStaffCustomers: vi.fn(),
   getStaffCustomer: vi.fn(),
   sendCustomerNotification: vi.fn(),
+  broadcastCustomerNotification: vi.fn(),
+  offerOrderPrice: vi.fn(),
   sendPaymentReminder: vi.fn(),
   listMyNotifications: vi.fn(),
   startCheckout: vi.fn(),
@@ -48,6 +51,7 @@ vi.mock("@/lib/orders.functions", () => ({
   updateOrderStatus: stubs.updateOrderStatus,
   approveOrder: stubs.approveOrder,
   requestRevision: stubs.requestRevision,
+  offerOrderPrice: stubs.offerOrderPrice,
 }));
 vi.mock("@/lib/payments.functions", () => ({
   refreshPayment: vi.fn(),
@@ -69,6 +73,7 @@ vi.mock("@/lib/notifications.functions", () => ({
   listMyNotifications: stubs.listMyNotifications,
   markNotificationsRead: vi.fn(),
   sendCustomerNotification: stubs.sendCustomerNotification,
+  broadcastCustomerNotification: stubs.broadcastCustomerNotification,
   sendPaymentReminder: stubs.sendPaymentReminder,
 }));
 
@@ -310,6 +315,75 @@ it("sends a portal offer only to the recipient selected by staff", async () => {
       body: "Ask us for this week’s offer.",
     },
   });
+});
+
+it("sends the same announcement to all customer inboxes without order details", async () => {
+  const user = userEvent.setup();
+  stubs.getStaffCustomer.mockResolvedValue(null);
+  stubs.broadcastCustomerNotification.mockResolvedValue({ count: 23 });
+  render(<StaffNotifications customerId="customer-1" orderCode="SE-48008" />);
+  await user.click(screen.getByRole("radio", { name: "All customers" }));
+  expect(screen.queryByLabelText("Find a customer")).toBeNull();
+  await user.type(screen.getByLabelText("Title"), "New service");
+  await user.type(
+    screen.getByLabelText("Message"),
+    "Presentation options are available.",
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Send to all customers" }),
+  );
+  await screen.findByText("Sent to 23 customers in the portal.");
+  expect(stubs.broadcastCustomerNotification).toHaveBeenCalledExactlyOnceWith({
+    data: {
+      requestId: expect.any(String),
+      kind: "notice",
+      title: "New service",
+      body: "Presentation options are available.",
+    },
+  });
+  expect(stubs.sendCustomerNotification).not.toHaveBeenCalled();
+});
+
+it("lets staff send a lower total for the selected unpaid order", async () => {
+  const user = userEvent.setup();
+  const order = {
+    ...deliveredOrder(),
+    status: "awaiting-payment",
+    price: 20,
+    paidAt: null,
+    checkoutStarted: false,
+  } as AdminOrderView;
+  const saved = vi.fn().mockResolvedValue(undefined);
+  stubs.offerOrderPrice.mockResolvedValue({ ok: true });
+  const { rerender } = render(
+    <StaffOrderPrice order={order} onSaved={saved} />,
+  );
+  await user.type(screen.getByLabelText("New total (USD)"), "17.50");
+  await user.click(
+    screen.getByRole("button", { name: "Save price & notify customer" }),
+  );
+  await waitFor(() =>
+    expect(saved).toHaveBeenCalledWith(
+      "Special price of $17.50 USD sent to the customer portal.",
+    ),
+  );
+  expect(stubs.offerOrderPrice).toHaveBeenCalledExactlyOnceWith({
+    data: {
+      code: order.code,
+      expectedCents: 2000,
+      priceCents: 1750,
+      requestId: expect.any(String),
+    },
+  });
+  rerender(
+    <StaffOrderPrice
+      order={{ ...order, checkoutStarted: true }}
+      onSaved={saved}
+    />,
+  );
+  expect(
+    screen.queryByRole("button", { name: "Save price & notify customer" }),
+  ).toBeNull();
 });
 
 it.each(["awaiting-payment", "in-progress"] as const)(
