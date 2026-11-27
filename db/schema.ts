@@ -35,6 +35,7 @@ export const orders = pgTable(
     paidAt: timestamp('paid_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     deliveryVersion: integer('delivery_version').notNull().default(0),
+    filesRevision: integer('files_revision').notNull().default(0),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     type: text().notNull(),
     service: text().$type<OrderService>().notNull().default('writing'),
@@ -154,7 +155,7 @@ export const walletEntries = pgTable.withRLS('wallet_entries', {
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  check('wallet_entries_sign_valid', sql`(${t.kind} = 'order-payment' and ${t.amountCents} < 0) or
+  check('wallet_entries_sign_valid', sql`(${t.kind} in ('order-payment', 'order-tip') and ${t.amountCents} < 0) or
     (${t.kind} in ('referral-reward', 'staff-reward', 'top-up', 'order-refund') and ${t.amountCents} > 0)`),
   index('wallet_entries_user_created_idx').on(t.userId, t.createdAt.desc(), t.id),
 ])
@@ -169,6 +170,20 @@ export const walletTopUps = pgTable.withRLS('wallet_top_ups', {
 }, (t) => [
   check('wallet_top_ups_positive', sql`${t.amountCents} > 0`),
   index('wallet_top_ups_user_pending_idx').on(t.userId, t.createdAt.desc()).where(sql`${t.paidAt} is null`),
+])
+
+export const orderTips = pgTable.withRLS('order_tips', {
+  orderId: integer('order_id').primaryKey().references(() => orders.id, { onDelete: 'cascade' }),
+  amountCents: integer('amount_cents').notNull(),
+  method: text().$type<'wallet' | 'online'>().notNull(),
+  reference: text().unique(),
+  paymentUrl: text('payment_url'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('order_tips_positive', sql`${t.amountCents} > 0`),
+  check('order_tips_payment_valid', sql`(${t.method} = 'wallet' and ${t.reference} is null and ${t.paidAt} is not null and ${t.paymentUrl} is null) or
+    (${t.method} = 'online' and ${t.reference} is not null)`),
 ])
 
 export const orderRequests = pgTable.withRLS('order_requests', {
@@ -208,6 +223,8 @@ export const orderFiles = pgTable(
     previewBlobKey: text('preview_blob_key'),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     releasedAt: timestamp('released_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedBy: text('removed_by'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -230,7 +247,10 @@ export const orderMessages = pgTable(
     supportName: text('support_name'),
     supportUserId: text('support_user_id'),
     body: text().notNull(),
+    fileUploaded: boolean('file_uploaded').notNull().default(false),
     readAt: timestamp('read_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedBy: text('removed_by'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -282,6 +302,8 @@ export const chatMessages = pgTable(
     supportUserId: text('support_user_id'),
     body: text().notNull(),
     readAt: timestamp('read_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedBy: text('removed_by'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

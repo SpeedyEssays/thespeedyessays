@@ -6,6 +6,7 @@ export const walletEntryLabels = {
   "staff-reward": "Support reward",
   "top-up": "Wallet top-up",
   "order-payment": "Order payment",
+  "order-tip": "Order tip",
   "order-refund": "Order refund",
 } as const;
 

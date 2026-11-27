@@ -280,16 +280,18 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
       ? deadlineInHours(now, data.deadlineHours)
       : null
     await getDb().transaction(async (tx) => {
+      await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, order.id)).for('update')
       const pendingDelivery = and(
         eq(orderFiles.orderId, order.id),
         inArray(orderFiles.kind, approvalFileKinds),
         isNull(orderFiles.deliveredAt),
+        isNull(orderFiles.removedAt),
       )
       const redelivery = status === 'completed' && order.status === 'completed'
       const pendingFiles = tx.select({ id: orderFiles.id }).from(orderFiles).where(pendingDelivery)
       if (redelivery && !(await pendingFiles.limit(1)).length) return
       const file = fileKind && tx.select({ id: orderFiles.id }).from(orderFiles).where(
-        and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, fileKind)),
+        and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, fileKind), isNull(orderFiles.removedAt)),
       )
       const [updated] = await tx.update(orders)
         .set({
@@ -447,8 +449,8 @@ export const updateStaffOrderDetails = createServerFn({ method: 'POST' })
 
 export const getOrderMessages = createServerFn({ method: 'GET' })
   .middleware([requireUser])
-  .validator(z.object({ code: z.string().max(20) }))
-  .handler(async ({ data, context }): Promise<OrderMessageView[]> => {
+  .validator(z.object({ code: z.string().max(20), includeFilesRevision: z.literal(true).optional() }))
+  .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     const rows = await getDb()
@@ -458,23 +460,26 @@ export const getOrderMessages = createServerFn({ method: 'GET' })
         supportName: orderMessages.supportName,
         supportAvatarId: staffAvatars.id,
         body: orderMessages.body,
+        fileUploaded: orderMessages.fileUploaded,
         createdAt: orderMessages.createdAt,
         readAt: orderMessages.readAt,
       })
       .from(orderMessages)
       .leftJoin(staffAvatars, eq(staffAvatars.userId, orderMessages.supportUserId))
-      .where(eq(orderMessages.orderId, order.id))
+      .where(and(eq(orderMessages.orderId, order.id), isNull(orderMessages.removedAt)))
       .orderBy(desc(orderMessages.id))
       .limit(200)
-    return rows.reverse().map((m) => ({
+    const messages = rows.reverse().map<OrderMessageView>((m) => ({
       id: m.id,
       sender: m.sender as OrderMessageView['sender'],
       supportName: m.supportName,
       supportAvatarId: m.supportAvatarId,
       body: m.body,
+      fileUploaded: m.fileUploaded,
       at: m.createdAt.toISOString(),
       readAt: m.readAt?.toISOString() ?? null,
     }))
+    return data.includeFilesRevision ? { messages, filesRevision: order.filesRevision } : messages
   })
 
 export const markOrderMessagesRead = createServerFn({ method: 'POST' })
@@ -497,6 +502,7 @@ export const markOrderMessagesRead = createServerFn({ method: 'POST' })
           eq(orderMessages.sender, context.user.isAdmin ? 'client' : 'support'),
           lte(orderMessages.id, data.through),
           isNull(orderMessages.readAt),
+          isNull(orderMessages.removedAt),
         ),
       )
     return { ok: true }
@@ -533,6 +539,23 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+export const removeOrderReply = createServerFn({ method: 'POST' })
+  .middleware([requireAdmin])
+  .validator(z.object({ code: z.string().max(20), messageId: z.number().int().positive().max(2147483647) }))
+  .handler(async ({ data, context }) => {
+    const id = orderIdFromCode(data.code)
+    if (!id) throw new Error('Order not found.')
+    await getDb().update(orderMessages)
+      .set({ removedAt: new Date(), removedBy: context.user.id })
+      .where(and(
+        eq(orderMessages.id, data.messageId),
+        eq(orderMessages.orderId, id),
+        eq(orderMessages.sender, 'support'),
+        isNull(orderMessages.removedAt),
+      ))
+    return { ok: true }
+  })
+
 export const approveOrder = createServerFn({ method: 'POST' })
   .middleware([requireCustomer])
   .validator(z.object({ code: z.string().max(20), deliveryVersion: z.number().int().nonnegative() }))
@@ -548,6 +571,7 @@ export const approveOrder = createServerFn({ method: 'POST' })
         eq(orderFiles.orderId, order.id),
         eq(orderFiles.kind, 'final'),
         isNotNull(orderFiles.deliveredAt),
+        isNull(orderFiles.removedAt),
       ))
       const [approved] = await tx.update(orders)
         .set({
@@ -575,6 +599,7 @@ export const approveOrder = createServerFn({ method: 'POST' })
         inArray(orderFiles.kind, approvalFileKinds),
         isNotNull(orderFiles.deliveredAt),
         isNull(orderFiles.releasedAt),
+        isNull(orderFiles.removedAt),
       ))
       await rewardApprovedReferral(tx, context.user.id, order.id)
     })

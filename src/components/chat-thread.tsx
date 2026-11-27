@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { customerGreeting, supportSenderLabel, withoutCustomerGreeting } from '@/lib/customer-greeting'
 import { LocalTime } from './local-time'
+import { RemoveFromPortal } from './remove-from-portal'
 import { StaffAvatar } from './staff-avatar'
 
 type Message = {
@@ -13,11 +14,11 @@ type Message = {
   body: string
   at: string
   readAt?: string | null
+  fileUploaded?: boolean
 }
 
 function mergeMessages(current: Message[] | null, rows: Message[]) {
   if (!current) return rows
-  if ((rows.at(-1)?.id ?? 0) < (current.at(-1)?.id ?? 0)) return current
   const seen = new Map(current.map(({ id, readAt }) => [id, readAt]))
   return rows.map((row) => ({
     ...row,
@@ -30,6 +31,7 @@ export function ChatThread({
   send,
   markRead,
   onRead,
+  removeReply,
   ownSender,
   ownLabel = 'You',
   otherLabel,
@@ -40,6 +42,7 @@ export function ChatThread({
   send: (body: string) => Promise<unknown>
   markRead?: (through: number) => Promise<unknown>
   onRead?: () => void
+  removeReply?: (id: number) => Promise<unknown>
   ownSender: string
   ownLabel?: string
   otherLabel: string
@@ -59,6 +62,7 @@ export function ChatThread({
   const [markedThrough, setMarkedThrough] = useState(0)
   const log = useRef<HTMLDivElement>(null)
   const markPending = useRef(false)
+  const latestLoad = useRef(0)
   const lastMessageId = messages?.at(-1)?.id
   const unreadThrough = messages?.reduce<number | undefined>(
     (latest, message) =>
@@ -105,31 +109,32 @@ export function ChatThread({
       log.current.scrollTop = log.current.scrollHeight
   }, [lastMessageId])
 
+  const refresh = useCallback(async (isActive: () => boolean = () => true) => {
+    const request = ++latestLoad.current
+    try {
+      const rows = await load()
+      if (!isActive() || request !== latestLoad.current) return
+      setMessages((current) => mergeMessages(current, rows))
+      setLoadError(false)
+      setReadError(false)
+    } catch {
+      if (isActive() && request === latestLoad.current) setLoadError(true)
+    }
+  }, [load])
+
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout>
     async function poll() {
-      try {
-        if (!document.hidden) {
-          const rows = await load()
-          if (active) {
-            setMessages((current) => mergeMessages(current, rows))
-            setLoadError(false)
-            setReadError(false)
-          }
-        }
-      } catch {
-        if (active) setLoadError(true)
-      } finally {
-        if (active) timer = setTimeout(poll, 6000)
-      }
+      if (!document.hidden) await refresh(() => active)
+      if (active) timer = setTimeout(poll, 6000)
     }
     void poll()
     return () => {
       active = false
       clearTimeout(timer)
     }
-  }, [load])
+  }, [refresh])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -140,13 +145,7 @@ export function ChatThread({
       await send(draft)
       setBody('')
       if (unreadThrough) void confirmRead(unreadThrough)
-      try {
-        const rows = await load()
-        setMessages((current) => mergeMessages(current, rows))
-        setLoadError(false)
-      } catch {
-        setLoadError(true)
-      }
+      await refresh()
     } catch {
       setSendError(true)
     } finally {
@@ -172,9 +171,8 @@ export function ChatThread({
           {messages?.map((message) => {
             const ownMessage = message.sender === ownSender
             const fromSupport = message.sender === 'agent' || message.sender === 'support'
-            const label = fromSupport
-              ? supportSenderLabel(message.supportName)
-              : ownMessage ? ownLabel : otherLabel
+            const label = message.fileUploaded ? 'File upload' : fromSupport
+              ? supportSenderLabel(message.supportName) : ownMessage ? ownLabel : otherLabel
             return (
               <li
                 key={message.id}
@@ -201,6 +199,16 @@ export function ChatThread({
                   }`}>
                     {message.readAt ? 'Read' : 'Delivered'}
                   </p>
+                )}
+                {removeReply && fromSupport && ownMessage && (
+                  <div className="mt-2 flex justify-end">
+                    <RemoveFromPortal item="message" onRemove={async () => {
+                      await removeReply(message.id)
+                      setMessages((current) => current?.filter(({ id }) => id !== message.id) ?? null)
+                      onRead?.()
+                      void refresh()
+                    }} />
+                  </div>
                 )}
               </li>
             )

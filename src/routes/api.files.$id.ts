@@ -23,7 +23,7 @@ export async function serveOrderFile(request: Request, fileId: string) {
     .from(orderFiles)
     .innerJoin(orders, eq(orderFiles.orderId, orders.id))
     .where(eq(orderFiles.id, id))
-  if (!record || (!user.isAdmin && record.owner !== user.id)) return fileNotFound()
+  if (!record || record.file.removedAt || (!user.isAdmin && record.owner !== user.id)) return fileNotFound()
 
   const { file } = record
   const access = user.isAdmin ? 'original' : customerFileAccess(file)

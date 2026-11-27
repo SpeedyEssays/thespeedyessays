@@ -183,9 +183,11 @@ export type OrderView = {
   paidAt: string | null
   deliveredAt: string | null
   deliveryVersion: number
+  filesRevision: number
   revisionStatus: ReturnType<typeof customerRevisionStatus>
   approvedAt: string | null
   feedback: OrderFeedbackView | null
+  tip: { amountCents: number; paidAt: string | null } | null
   checkoutStarted: boolean
   status: OrderStatus
   originalityScore: number | null
@@ -209,6 +211,7 @@ export type OrderMessageView = {
   body: string
   at: string
   readAt: string | null
+  fileUploaded: boolean
 }
 
 const allowedUploadExtensions = [

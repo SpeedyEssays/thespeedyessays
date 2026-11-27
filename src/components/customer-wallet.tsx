@@ -38,7 +38,9 @@ export function WalletActivity({
           <div className="min-w-0 flex-1">
             <p className="font-medium">{walletEntryLabels[entry.kind]}</p>
             <p className="wrap-anywhere text-muted-foreground">
-              {entry.description}
+              {entry.kind === "top-up"
+                ? "Online top-up confirmed."
+                : entry.description}
             </p>
             <LocalTime
               at={entry.createdAt}
@@ -172,7 +174,7 @@ export function CustomerWallet({
               {formatUSD(wallet.balanceCents / 100)}{" "}
               <span className="text-lg">USD</span>
             </p>
-            <p className="text-sm">Available to pay for orders</p>
+            <p className="text-sm">Available for orders and tips</p>
           </div>
           <form className="space-y-3 p-5" onSubmit={createTopUp}>
             <Label htmlFor="wallet-top-up">Add funds in USD</Label>
@@ -194,13 +196,13 @@ export function CustomerWallet({
                   amountCents < MIN_CHECKOUT_CENTS
                 }
               >
-                {busy ? "Please wait…" : "Top up with Paystack"}
+                {busy ? "Please wait…" : "Top Up"}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {wallet.canTopUp
                 ? `Minimum top-up ${formatUSD(MIN_CHECKOUT_CENTS / 100)} USD.`
-                : "Online top-ups are unavailable until Paystack USD checkout is enabled."}
+                : "Online top-ups are unavailable right now."}
             </p>
           </form>
         </section>

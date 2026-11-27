@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,11 +10,16 @@ import { OrderDeadline } from '@/components/order-deadline'
 import { OrderFeedbackForm } from '@/components/order-feedback-form'
 import { AddFilePreview, OrderFileUpload } from '@/components/order-file-upload'
 import { OrderPayment } from '@/components/order-payment'
-import { hasOpenDeadline, isDeadlinePast } from '@/lib/order-deadline'
+import { OrderTip } from '@/components/order-tip'
+import { RemoveFromPortal } from '@/components/remove-from-portal'
+import { removeStaffFile } from '@/lib/files.functions'
+import { isDeadlinePast } from '@/lib/order-deadline'
+import { canLeaveOrderTip } from '@/lib/order-tip'
 import {
   approveOrder,
   getOrderMessages,
   markOrderMessagesRead,
+  removeOrderReply,
   requestRevision,
   sendOrderMessage,
 } from '@/lib/orders.functions'
@@ -39,6 +44,8 @@ export function OrderPanel({
   replyNotice,
   onRead,
   walletBalanceCents,
+  canPayTipOnline = false,
+  tipCheckout,
 }: {
   order: OrderView
   now: number | null
@@ -46,6 +53,8 @@ export function OrderPanel({
   replyNotice?: string
   onRead?: () => void
   walletBalanceCents?: number
+  canPayTipOnline?: boolean
+  tipCheckout?: 'return' | 'closed'
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -59,11 +68,18 @@ export function OrderPanel({
     (order.revisionStatus === 'available' && revisionWindowEnds !== null && now !== null && now >= revisionWindowEnds)
   const canRevise = order.revisionStatus === 'available' && !revisionExpired
   const needsRevisionDeadline = now !== null && isDeadlinePast(order.dueAt, now)
+  const observedFiles = useRef(order.filesRevision)
 
-  const load = useCallback(
-    () => getOrderMessages({ data: { code: order.code } }),
-    [order.code],
-  )
+  const load = useCallback(async () => {
+    const thread = await getOrderMessages({ data: { code: order.code, includeFilesRevision: true } })
+    if (Array.isArray(thread)) return thread
+    const { messages, filesRevision } = thread
+    if (filesRevision > Math.max(order.filesRevision, observedFiles.current)) {
+      observedFiles.current = filesRevision
+      void router.invalidate()
+    }
+    return messages
+  }, [order.code, order.filesRevision, router])
   const send = useCallback(
     (body: string) =>
       sendOrderMessage({ data: { code: order.code, body } }),
@@ -97,7 +113,6 @@ export function OrderPanel({
   }
 
   const payable = canCheckout(order)
-  const active = hasOpenDeadline(order.status)
   const turnaround = deadlines.find((option) => option.id === order.deadlineOption)?.label
   const length = formatOrderLength(order.pages, order.wordCount, order.slideCount)
   const language = order.language && orderLanguages[order.language]
@@ -210,7 +225,7 @@ export function OrderPanel({
               : 'You haven’t uploaded any files yet.'}
           </p>
         )}
-        {!staff && active && <OrderFileUpload code={order.code} staff={false} />}
+        {!staff && <OrderFileUpload code={order.code} staff={false} />}
       </section>
       <section
         aria-labelledby="staff-files"
@@ -343,6 +358,15 @@ export function OrderPanel({
       {!staff && order.approvedAt && (
         <OrderFeedbackForm code={order.code} feedback={order.feedback} />
       )}
+      {!staff && (order.tip || canLeaveOrderTip(order.status)) && (
+        <OrderTip code={order.code} priceCents={Math.round(order.price * 100)} tip={order.tip}
+          walletBalanceCents={walletBalanceCents ?? 0} canPayOnline={canPayTipOnline} checkout={tipCheckout} />
+      )}
+      {staff && order.tip?.paidAt && (
+        <p className="rounded-lg border bg-background p-4 text-sm font-medium">
+          Tip received · {formatUSD(order.tip.amountCents / 100)} USD
+        </p>
+      )}
       <section className="space-y-3">
         <h3 className="text-lg font-semibold">
           {staff ? 'Customer messages' : 'Order messages'}
@@ -352,6 +376,7 @@ export function OrderPanel({
           send={send}
           markRead={markRead}
           onRead={onRead}
+          removeReply={staff ? (messageId) => removeOrderReply({ data: { code: order.code, messageId } }) : undefined}
           ownSender={staff ? 'support' : 'client'}
           ownLabel={staff ? 'Support' : 'You'}
           otherLabel={staff ? 'Customer' : 'Support'}
@@ -377,6 +402,7 @@ function OrderDetailTable({ details }: { details: ReadonlyArray<readonly [string
 }
 
 function OrderFileList({ files, code, staff }: { files: OrderFileView[]; code: string; staff: boolean }) {
+  const router = useRouter()
   return (
     <ul className="space-y-2">
       {files.map((file) => {
@@ -410,6 +436,12 @@ function OrderFileList({ files, code, staff }: { files: OrderFileView[]; code: s
                       {protectedFile ? staff ? 'Download original' : 'Download clean copy' : 'Download'}
                     </a>
                   </Button>
+                )}
+                {staff && staffFileKinds.some((kind) => kind === file.kind) && (
+                  <RemoveFromPortal item="file" name={file.name} onRemove={async () => {
+                    await removeStaffFile({ data: { fileId: file.id } })
+                    await router.invalidate()
+                  }} />
                 )}
               </div>
             </div>

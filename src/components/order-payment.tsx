@@ -39,7 +39,7 @@ export function OrderPayment({
         if (paid) {
           await router.invalidate();
         } else {
-          setProblem("Paystack hasn’t confirmed the payment yet.");
+          setProblem("The payment is still awaiting confirmation.");
         }
       }
     } catch (error) {

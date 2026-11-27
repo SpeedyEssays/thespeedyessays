@@ -1,9 +1,9 @@
 // Server-side helpers for reading orders. Only import
 // this module from server function handlers and API routes.
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db'
-import { orderFeedback, orderFiles, orderMessages, orders } from '../../db/schema'
+import { orderFeedback, orderFiles, orderMessages, orders, orderTips } from '../../db/schema'
 import {
   customerFileAccess,
   customerRevisionStatus,
@@ -19,6 +19,7 @@ import {
 
 type OrderRow = typeof orders.$inferSelect
 type FileRow = typeof orderFiles.$inferSelect
+type TipRow = Pick<typeof orderTips.$inferSelect, 'amountCents' | 'paidAt'>
 
 export function feedbackView(row: typeof orderFeedback.$inferSelect): OrderFeedbackView {
   return {
@@ -32,6 +33,7 @@ export function feedbackView(row: typeof orderFeedback.$inferSelect): OrderFeedb
 function toView(
   row: OrderRow,
   files: FileRow[],
+  tip: TipRow | null,
   staff = false,
   feedback: OrderFeedbackView | null = null,
 ): OrderView {
@@ -66,9 +68,11 @@ function toView(
     paidAt: row.paidAt?.toISOString() ?? null,
     deliveredAt: row.deliveredAt?.toISOString() ?? null,
     deliveryVersion: row.deliveryVersion,
+    filesRevision: row.filesRevision,
     revisionStatus: customerRevisionStatus(row),
     approvedAt: (row.approvedAt ?? (row.status === 'approved' ? row.updatedAt : null))?.toISOString() ?? null,
     feedback,
+    tip: tip ? { amountCents: tip.amountCents, paidAt: tip.paidAt?.toISOString() ?? null } : null,
     status: row.status as OrderStatus,
     originalityScore: row.originalityScore,
     instructions: row.instructions,
@@ -92,24 +96,25 @@ async function filesFor(ids: number[]) {
   return getDb()
     .select()
     .from(orderFiles)
-    .where(inArray(orderFiles.orderId, ids))
+    .where(and(inArray(orderFiles.orderId, ids), isNull(orderFiles.removedAt)))
     .orderBy(asc(orderFiles.createdAt))
 }
 
 export async function listOrdersForUser(userId: string) {
   const rows = await getDb()
-    .select()
+    .select({ order: orders, tip: { amountCents: orderTips.amountCents, paidAt: orderTips.paidAt } })
     .from(orders)
+    .leftJoin(orderTips, eq(orderTips.orderId, orders.id))
     .where(eq(orders.userId, userId))
     .orderBy(desc(orders.createdAt))
   if (!rows.length) return []
-  const ids = rows.map((row) => row.id)
+  const ids = rows.map(({ order }) => order.id)
   const [files, feedback] = await Promise.all([
     filesFor(ids),
     getDb().select().from(orderFeedback).where(inArray(orderFeedback.orderId, ids)),
   ])
   const byOrder = new Map(feedback.map((row) => [row.orderId, feedbackView(row)]))
-  return rows.map((row) => toView(row, files, false, byOrder.get(row.id)))
+  return rows.map(({ order, tip }) => toView(order, files, tip, false, byOrder.get(order.id)))
 }
 
 export async function listAllOrders(
@@ -118,18 +123,21 @@ export async function listAllOrders(
   const rows = await getDb()
     .select({
       order: orders,
+      tip: { amountCents: orderTips.amountCents, paidAt: orderTips.paidAt },
       lastSender: sql<string | null>`(
         select message.sender from ${orderMessages} message
-        where message.order_id = ${orders}."id" order by message.id desc limit 1
+        where message.order_id = ${orders}."id" and message.removed_at is null and not message.file_uploaded
+        order by message.id desc limit 1
       )`,
     })
     .from(orders)
+    .leftJoin(orderTips, eq(orderTips.orderId, orders.id))
     .where(customerId ? eq(orders.userId, customerId) : undefined)
     .orderBy(desc(orders.createdAt), desc(orders.id))
     .limit(500)
   const files = await filesFor(rows.map(({ order }) => order.id))
-  return rows.map(({ order, lastSender }) => ({
-    ...toView(order, files, true),
+  return rows.map(({ order, tip, lastSender }) => ({
+    ...toView(order, files, tip, true),
     clientId: order.userId,
     clientEmail: order.clientEmail,
     clientName: order.clientName,

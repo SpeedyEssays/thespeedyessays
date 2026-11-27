@@ -33,6 +33,7 @@ import {
   listSupportChats,
   markSupportChatRead,
   readSupportChat,
+  removeWebsiteReply,
   sendSupportChat,
 } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
@@ -650,6 +651,7 @@ function SupportConversation({
       markRead={markRead}
       onRead={onRead}
       ownSender="agent"
+      removeReply={(messageId) => removeWebsiteReply({ data: { id, messageId } })}
       ownLabel="Support"
       otherLabel={customer ? 'Customer' : 'Visitor'}
       emptyText="No messages yet."

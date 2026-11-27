@@ -18,7 +18,7 @@ import { getMyDisplayName } from '@/lib/customers.functions'
 import { getCustomerInboxCounts } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
-import { refreshPayment } from '@/lib/payments.functions'
+import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
 import { formatUSD } from '@/lib/pricing'
 import { getMyWallet, getMyWalletBalance } from '@/lib/wallet.functions'
 import { walletReferencePattern } from '@/lib/wallet'
@@ -52,11 +52,12 @@ const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { order?: string; reference?: string; walletReference?: string; paymentExit?: 'closed'; tab?: 'chat' | 'notifications' | 'wallet' } => ({
+  ): { order?: string; reference?: string; walletReference?: string; paymentExit?: 'closed'; tipCheckout?: 'return' | 'closed'; tab?: 'chat' | 'notifications' | 'wallet' } => ({
     tab: search.tab === 'chat' || search.tab === 'notifications' || search.tab === 'wallet' ? search.tab : undefined,
     walletReference: typeof search.walletReference === 'string' && walletReferencePattern.test(search.walletReference) ? search.walletReference : undefined,
     order: typeof search.order === 'string' ? search.order : undefined,
     paymentExit: search.paymentExit === 'closed' ? 'closed' : undefined,
+    tipCheckout: search.tipCheckout === 'return' || search.tipCheckout === 'closed' ? search.tipCheckout : undefined,
     reference:
       typeof search.reference === 'string' &&
       /^se-[0-9a-f-]{36}$/.test(search.reference)
@@ -76,13 +77,14 @@ export const Route = createFileRoute('/dashboard')({
   },
   loaderDeps: ({ search }) => ({ walletTab: search.tab === 'wallet' }),
   loader: async ({ deps }) => {
-    const [orders, displayName, wallet, balanceCents] = await Promise.all([
+    const [orders, displayName, wallet, balanceCents, canPayTipOnline] = await Promise.all([
       listMyOrders(),
       getMyDisplayName(),
       deps.walletTab ? getMyWallet() : null,
       deps.walletTab ? null : getMyWalletBalance(),
+      isCheckoutAvailable(),
     ])
-    return { orders, displayName, wallet, balanceCents: wallet?.balanceCents ?? balanceCents ?? 0 }
+    return { orders, displayName, wallet, balanceCents: wallet?.balanceCents ?? balanceCents ?? 0, canPayTipOnline }
   },
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({
@@ -98,9 +100,9 @@ function Dashboard() {
   const { user } = Route.useRouteContext()
   useCustomerActivity(!user.isAdmin)
   const { data: counts, refresh: refreshUnread } = useInboxData(getCustomerInboxCounts)
-  const { orders, displayName, wallet, balanceCents } = Route.useLoaderData()
+  const { orders, displayName, wallet, balanceCents, canPayTipOnline } = Route.useLoaderData()
   const now = useOrderClock()
-  const { order, reference, walletReference, paymentExit, tab } = Route.useSearch()
+  const { order, reference, walletReference, paymentExit, tipCheckout, tab } = Route.useSearch()
   const router = useRouter()
   const [paymentNotice, setPaymentNotice] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -114,7 +116,7 @@ function Dashboard() {
       const { paid } = await refreshPayment({ data: { reference } })
       await router.invalidate()
       setPaymentNotice(
-        paid ? 'Payment confirmed.' : 'Paystack hasn’t confirmed the payment yet.',
+        paid ? 'Payment confirmed.' : 'The payment is still awaiting confirmation.',
       )
     } catch {
       setPaymentNotice(
@@ -131,7 +133,7 @@ function Dashboard() {
     void refreshPayment({ data: { reference } }).then(
       ({ paid }) => {
         if (!active) return
-        setPaymentNotice(paid ? 'Payment confirmed.' : 'Paystack hasn’t confirmed the payment yet.')
+        setPaymentNotice(paid ? 'Payment confirmed.' : 'The payment is still awaiting confirmation.')
         void router.invalidate()
       },
       () => {
@@ -252,6 +254,8 @@ function Dashboard() {
                 order={selected}
                 now={now}
                 walletBalanceCents={balanceCents}
+                canPayTipOnline={canPayTipOnline}
+                tipCheckout={selected.code === order ? tipCheckout : undefined}
                 onRead={refreshUnread}
               />
             </div>

@@ -12,6 +12,7 @@ import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
 import { OrderPayment } from "./order-payment";
+import { OrderTip } from "./order-tip";
 import { StaffCampaigns } from "./staff-campaigns";
 import { StaffNotifications } from "./staff-notifications";
 import { StaffOrderPrice } from "./staff-order-price";
@@ -37,6 +38,7 @@ const stubs = vi.hoisted(() => ({
   requestOrderChange: vi.fn(),
   listCustomerOrderRequests: vi.fn(),
   payOrderFromWallet: vi.fn(),
+  payOrderTipFromWallet: vi.fn(),
   uploadOrderFile: vi.fn(),
   prepareDeliveryPreview: vi.fn(),
   invalidate: vi.fn(),
@@ -76,6 +78,11 @@ vi.mock("@/lib/wallet.functions", () => ({
   payOrderFromWallet: stubs.payOrderFromWallet,
   refreshWalletTopUp: vi.fn(),
   startWalletTopUp: vi.fn(),
+}));
+vi.mock("@/lib/order-tips.functions", () => ({
+  checkOrderTip: vi.fn(),
+  payOrderTipFromWallet: stubs.payOrderTipFromWallet,
+  startOrderTipCheckout: vi.fn(),
 }));
 vi.mock("@/lib/files.functions", () => ({
   uploadOrderFile: stubs.uploadOrderFile,
@@ -139,9 +146,37 @@ it("shows the USD wallet, invitation link, and referral credit", () => {
   expect(screen.getByLabelText("Your invitation link")).toHaveValue(
     "https://example.test/refer/sample",
   );
+  expect(screen.getByRole("button", { name: "Top Up" })).toBeDisabled();
+});
+
+it("calculates percentage tips and charges the selected custom tip separately", async () => {
+  const user = userEvent.setup();
+  stubs.payOrderTipFromWallet.mockResolvedValue({ ok: true });
+  render(
+    <OrderTip
+      code="SE-48014"
+      priceCents={4000}
+      tip={null}
+      walletBalanceCents={500}
+      canPayOnline
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "10% · $4.00" }));
   expect(
-    screen.getByRole("button", { name: "Top up with Paystack" }),
+    screen.getByRole("button", { name: "Tip $4.00 from wallet" }),
+  ).toBeEnabled();
+  expect(stubs.payOrderTipFromWallet).not.toHaveBeenCalled();
+  await user.type(screen.getByLabelText("Custom tip in USD"), "0.75");
+  expect(
+    screen.getByRole("button", { name: "Tip $0.75 online" }),
   ).toBeDisabled();
+  await user.click(
+    screen.getByRole("button", { name: "Tip $0.75 from wallet" }),
+  );
+  expect(stubs.payOrderTipFromWallet).toHaveBeenCalledExactlyOnceWith({
+    data: { code: "SE-48014", amountCents: 75 },
+  });
+  expect(stubs.payOrderFromWallet).not.toHaveBeenCalled();
 });
 
 it("uses the displayed price for wallet checkout", async () => {

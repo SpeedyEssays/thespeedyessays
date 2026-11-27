@@ -45,7 +45,7 @@ export async function reconcileWalletTopUp(
         eventKey: reference,
         kind: "top-up",
         amountCents: recorded.amountCents,
-        description: "Confirmed Paystack top-up.",
+        description: "Online top-up confirmed.",
       })
     ) {
       await notifyWalletCredit(

@@ -50,7 +50,11 @@ async function messagesFor(conversationId: string, guestOnly = false) {
     .from(chatMessages)
     .innerJoin(chatConversations, eq(chatMessages.conversationId, chatConversations.id))
     .leftJoin(staffAvatars, eq(staffAvatars.userId, chatMessages.supportUserId))
-    .where(and(eq(chatMessages.conversationId, conversationId), guestOnly ? isNull(chatConversations.userId) : undefined))
+    .where(and(
+      eq(chatMessages.conversationId, conversationId),
+      isNull(chatMessages.removedAt),
+      guestOnly ? isNull(chatConversations.userId) : undefined,
+    ))
     .orderBy(desc(chatMessages.id))
     .limit(200)
     .then((rows) =>
@@ -181,6 +185,7 @@ async function markChatRead(
         eq(chatMessages.sender, sender),
         through !== undefined ? lte(chatMessages.id, through) : undefined,
         isNull(chatMessages.readAt),
+        isNull(chatMessages.removedAt),
         guestOnly
           ? exists(
               db.select({ id: chatConversations.id })
@@ -283,16 +288,16 @@ export const listSupportChats = createServerFn({ method: 'GET' })
         at: chatConversations.lastMessageAt,
         latest: sql<string | null>`(
           select left(cm.body, 240) from ${chatMessages} cm where cm.conversation_id = ${chatConversations}."id"
-          order by cm.id desc limit 1
+          and cm.removed_at is null order by cm.id desc limit 1
         )`,
         sender: sql<string | null>`(
           select cm.sender from ${chatMessages} cm where cm.conversation_id = ${chatConversations}."id"
-          order by cm.id desc limit 1
+          and cm.removed_at is null order by cm.id desc limit 1
         )`,
         unread: sql<number>`(
           select count(*)::int from ${chatMessages} cm
           where cm.conversation_id = ${chatConversations}."id"
-            and cm.sender = 'visitor' and cm.read_at is null
+            and cm.sender = 'visitor' and cm.read_at is null and cm.removed_at is null
         )`,
       })
       .from(chatConversations)
@@ -321,6 +326,21 @@ export const markSupportChatRead = createServerFn({ method: 'POST' })
   .validator(staffThread.extend(readThrough.partial().shape))
   .handler(({ data }) => markChatRead(data.id, 'visitor', data.through))
 
+export const removeWebsiteReply = createServerFn({ method: 'POST' })
+  .middleware([requireAdmin])
+  .validator(staffThread.extend({ messageId: z.number().int().positive().max(2147483647) }))
+  .handler(async ({ data, context }) => {
+    await getDb().update(chatMessages)
+      .set({ removedAt: new Date(), removedBy: context.user.id })
+      .where(and(
+        eq(chatMessages.conversationId, data.id),
+        eq(chatMessages.id, data.messageId),
+        eq(chatMessages.sender, 'agent'),
+        isNull(chatMessages.removedAt),
+      ))
+    return { ok: true }
+  })
+
 function unreadOrders(customerId?: string) {
   return getDb()
     .select({ orderId: orders.id, customerId: orders.userId, unread: count() })
@@ -328,6 +348,7 @@ function unreadOrders(customerId?: string) {
     .innerJoin(orders, eq(orders.id, orderMessages.orderId))
     .where(and(
       isNull(orderMessages.readAt),
+      isNull(orderMessages.removedAt),
       eq(orderMessages.sender, customerId ? 'support' : 'client'),
       customerId ? eq(orders.userId, customerId) : undefined,
     ))
@@ -356,6 +377,7 @@ export const getCustomerInboxCounts = createServerFn({ method: 'GET' })
               eq(chatMessages.conversationId, conversation.id),
               eq(chatMessages.sender, 'agent'),
               isNull(chatMessages.readAt),
+              isNull(chatMessages.removedAt),
               conversation.guestOnly ? isNull(chatConversations.userId) : undefined,
             ))
         : [],
@@ -376,7 +398,7 @@ export const getStaffInboxCounts = createServerFn({ method: 'GET' })
       db.select({ customerId: chatConversations.userId, unread: count() })
         .from(chatMessages)
         .innerJoin(chatConversations, eq(chatConversations.id, chatMessages.conversationId))
-        .where(and(eq(chatMessages.sender, 'visitor'), isNull(chatMessages.readAt)))
+        .where(and(eq(chatMessages.sender, 'visitor'), isNull(chatMessages.readAt), isNull(chatMessages.removedAt)))
         .groupBy(chatConversations.userId),
       unreadOrders(),
       db.select({ id: customerPresence.userId }).from(customerPresence).where(activeCustomer),

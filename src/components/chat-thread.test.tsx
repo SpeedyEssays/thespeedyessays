@@ -1,7 +1,85 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { messageBody } from "@/lib/chat-message";
 import { ChatThread } from "./chat-thread";
+
+const fileNotice = {
+  id: 1,
+  sender: "client",
+  supportName: null,
+  body: "New file uploaded\nBrief.pdf",
+  at: "2026-11-21T14:05:00.000Z",
+  fileUploaded: true,
+};
+const staffReply = {
+  id: 2,
+  sender: "support",
+  supportName: "Marvin",
+  body: "Accidental reply",
+  at: "2026-11-21T14:06:00.000Z",
+};
+
+it("shows a file upload notice to both sides and removes only the staff reply", async () => {
+  const load = vi.fn().mockResolvedValue([fileNotice, staffReply]);
+  const removeReply = vi.fn(async () => {
+    load.mockResolvedValue([fileNotice]);
+  });
+  const props = {
+    load,
+    send: vi.fn(),
+    otherLabel: "Customer",
+    emptyText: "No messages",
+  };
+  const { rerender } = render(
+    <ChatThread {...props} ownSender="support" removeReply={removeReply} />,
+  );
+  expect(await screen.findByText("File upload")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove message" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Remove this message?",
+  });
+  expect(removeReply).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Remove message" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByText("Accidental reply")).not.toBeInTheDocument(),
+  );
+  expect(removeReply).toHaveBeenCalledExactlyOnceWith(2);
+  rerender(<ChatThread {...props} ownSender="client" />);
+  expect(screen.getByText("File upload")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Remove message" }),
+  ).not.toBeInTheDocument();
+});
+
+it("allows a customer chat refresh to clear the newest reply after staff removes it", async () => {
+  const props = {
+    send: vi.fn(),
+    ownSender: "client",
+    otherLabel: "Support",
+    emptyText: "No messages",
+  };
+  const { rerender } = render(
+    <ChatThread
+      {...props}
+      load={vi.fn().mockResolvedValue([fileNotice, staffReply])}
+    />,
+  );
+  expect(await screen.findByText("Accidental reply")).toBeInTheDocument();
+  rerender(
+    <ChatThread {...props} load={vi.fn().mockResolvedValue([fileNotice])} />,
+  );
+  await waitFor(() =>
+    expect(screen.queryByText("Accidental reply")).not.toBeInTheDocument(),
+  );
+});
 
 it.each(["client", "support"])(
   "shows both message timestamps for the %s",
