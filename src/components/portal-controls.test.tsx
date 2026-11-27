@@ -5,10 +5,13 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import type { AdminOrderView, OrderView } from "@/lib/orders";
 import { CustomerNotifications } from "./customer-notifications";
+import { CustomerOrderRequests } from "./customer-order-requests";
+import { CustomerWallet } from "./customer-wallet";
 import { OrderDeadline } from "./order-deadline";
 import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
+import { OrderPayment } from "./order-payment";
 import { StaffCampaigns } from "./staff-campaigns";
 import { StaffNotifications } from "./staff-notifications";
 import { StaffOrderPrice } from "./staff-order-price";
@@ -31,6 +34,9 @@ const stubs = vi.hoisted(() => ({
   startCheckout: vi.fn(),
   approveOrder: vi.fn(),
   requestRevision: vi.fn(),
+  requestOrderChange: vi.fn(),
+  listCustomerOrderRequests: vi.fn(),
+  payOrderFromWallet: vi.fn(),
   uploadOrderFile: vi.fn(),
   prepareDeliveryPreview: vi.fn(),
   invalidate: vi.fn(),
@@ -58,9 +64,18 @@ vi.mock("@/lib/orders.functions", () => ({
   requestRevision: stubs.requestRevision,
   offerOrderPrice: stubs.offerOrderPrice,
 }));
+vi.mock("@/lib/order-requests.functions", () => ({
+  requestOrderChange: stubs.requestOrderChange,
+  listCustomerOrderRequests: stubs.listCustomerOrderRequests,
+}));
 vi.mock("@/lib/payments.functions", () => ({
   refreshPayment: vi.fn(),
   startCheckout: stubs.startCheckout,
+}));
+vi.mock("@/lib/wallet.functions", () => ({
+  payOrderFromWallet: stubs.payOrderFromWallet,
+  refreshWalletTopUp: vi.fn(),
+  startWalletTopUp: vi.fn(),
 }));
 vi.mock("@/lib/files.functions", () => ({
   uploadOrderFile: stubs.uploadOrderFile,
@@ -94,7 +109,113 @@ vi.mock("@/lib/offer-email.functions", () => ({
 
 beforeEach(() => {
   vi.resetAllMocks();
+  stubs.listCustomerOrderRequests.mockResolvedValue([]);
 });
+
+it("shows the USD wallet, invitation link, and referral credit", () => {
+  render(
+    <CustomerWallet
+      checkoutClosed={false}
+      wallet={{
+        balanceCents: 300,
+        referralCode: "sample",
+        referralUrl: "https://example.test/refer/sample",
+        canTopUp: false,
+        topUps: [],
+        entries: [
+          {
+            id: "award",
+            kind: "referral-reward",
+            amountCents: 300,
+            description: "A friend you referred approved an order.",
+            createdAt: "2026-11-27T08:00:00Z",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByText("Referral reward")).toBeInTheDocument();
+  expect(screen.getByText("+$3.00 USD")).toBeInTheDocument();
+  expect(screen.getByLabelText("Your invitation link")).toHaveValue(
+    "https://example.test/refer/sample",
+  );
+  expect(
+    screen.getByRole("button", { name: "Top up with Paystack" }),
+  ).toBeDisabled();
+});
+
+it("uses the displayed price for wallet checkout", async () => {
+  const user = userEvent.setup();
+  stubs.payOrderFromWallet.mockResolvedValue({ ok: true });
+  render(
+    <OrderPayment
+      code="SE-48014"
+      wallet={{ balanceCents: 300, priceCents: 200 }}
+    />,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Pay $2.00 from wallet" }),
+  );
+  await waitFor(() =>
+    expect(stubs.payOrderFromWallet).toHaveBeenCalledExactlyOnceWith({
+      data: { code: "SE-48014", expectedCents: 200 },
+    }),
+  );
+});
+
+it.each([
+  {
+    paidAt: null,
+    status: "awaiting-payment",
+    button: "Cancel order",
+    action: "Confirm cancellation",
+    label: "Reason for cancellation",
+    kind: "cancellation",
+    result: "approved",
+  },
+  {
+    paidAt: "2026-11-27T10:00:00Z",
+    status: "in-progress",
+    button: "Request a refund",
+    action: "Send request",
+    label: "Reason for refund",
+    kind: "refund",
+    result: "pending",
+  },
+])(
+  "collects a reason and submits a customer $kind request",
+  async ({ paidAt, status, button, action, label, kind, result }) => {
+    const user = userEvent.setup();
+    const order = {
+      code: "SE-48014",
+      status,
+      paidAt,
+      deliveredAt: null,
+      price: 20,
+      refundedCents: 0,
+    } as OrderView;
+    stubs.requestOrderChange.mockResolvedValue({ status: result });
+    render(<CustomerOrderRequests order={order} />);
+    await user.click(screen.getByText("Cancellation and refund options"));
+    await user.click(screen.getByRole("button", { name: button }));
+    expect(screen.getByRole("button", { name: action })).toBeDisabled();
+    await user.type(
+      screen.getByLabelText(label),
+      "My project schedule has changed.",
+    );
+    await user.click(screen.getByRole("button", { name: action }));
+    await waitFor(() =>
+      expect(stubs.requestOrderChange).toHaveBeenCalledExactlyOnceWith({
+        data: {
+          code: "SE-48014",
+          kind,
+          reason: "My project schedule has changed.",
+          requestId: expect.any(String),
+        },
+      }),
+    );
+  },
+);
 
 it("keeps individual campaign email and can queue an offer for all customers", async () => {
   const user = userEvent.setup();

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ChatThread } from '@/components/chat-thread'
+import { CustomerOrderRequests } from '@/components/customer-order-requests'
 import { DeadlineDurationField } from '@/components/deadline-duration-field'
 import { OrderDeadline } from '@/components/order-deadline'
 import { OrderFeedbackForm } from '@/components/order-feedback-form'
@@ -37,12 +38,14 @@ export function OrderPanel({
   staff = false,
   replyNotice,
   onRead,
+  walletBalanceCents,
 }: {
   order: OrderView
   now: number | null
   staff?: boolean
   replyNotice?: string
   onRead?: () => void
+  walletBalanceCents?: number
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -141,6 +144,9 @@ export function OrderPanel({
               )}
               {formatUSD(order.price)} USD
             </p>
+            {order.refundedCents > 0 && (
+              <p className="mt-1 text-xs font-medium text-success">{formatUSD(order.refundedCents / 100)} USD refunded</p>
+            )}
             {(order.paidAt || payable) && (
               <p className={`text-xs font-medium ${order.paidAt ? 'text-success' : 'text-muted-foreground'}`}>
                 {order.paidAt ? 'Payment confirmed' : 'Payment due'}
@@ -184,8 +190,10 @@ export function OrderPanel({
         )}
       </div>
       {!staff && payable && (
-        <OrderPayment code={order.code} checkoutStarted={order.checkoutStarted} />
+        <OrderPayment code={order.code} checkoutStarted={order.checkoutStarted}
+          wallet={walletBalanceCents === undefined ? undefined : { balanceCents: walletBalanceCents, priceCents: Math.round(order.price * 100) }} />
       )}
+      {!staff && <CustomerOrderRequests order={order} onChange={onRead} />}
       <section
         aria-labelledby="customer-files"
         className="space-y-3 rounded-lg border bg-background p-4"

@@ -3,7 +3,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { and, eq, isNull, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
-import { orderFiles, orders } from '../../db/schema'
+import { orders } from '../../db/schema'
 import { requireCustomer } from './identity.functions'
 import { findAccessibleOrder } from './order-records'
 import { canCheckout, orderCode } from './orders'
@@ -12,6 +12,7 @@ import {
   paymentReferenceSchema,
   paystackConfig,
   reconcilePayment,
+  requireOrderPaymentBrief,
 } from './payments.server'
 
 export const isCheckoutAvailable = createServerFn({ method: 'GET' }).handler(() => !!paystackConfig())
@@ -31,14 +32,7 @@ export const startCheckout = createServerFn({ method: 'POST' })
     if (order.paidAt) return { url: callback.href }
     if (!canCheckout(order)) throw new Error('This order is no longer eligible for payment.')
     const db = getDb()
-    if (order.instructions.length < 20) {
-      const [brief] = await db
-        .select({ id: orderFiles.id })
-        .from(orderFiles)
-        .where(and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, 'brief')))
-        .limit(1)
-      if (!brief) throw new Error('Upload your brief in the dashboard before paying.')
-    }
+    await requireOrderPaymentBrief(db, order)
     if (order.paymentUrl && order.paymentReference) {
       // Reopen the same transaction so a retry cannot create a second charge.
       const paid = await reconcilePayment(order.paymentReference)
@@ -74,14 +68,17 @@ export const startCheckout = createServerFn({ method: 'POST' })
         },
         cancel.href,
       )
-      await db
+      const [saved] = await db
         .update(orders)
         .set({ paymentUrl: url })
-        .where(and(eq(orders.id, order.id), eq(orders.paymentReference, reference)))
+        .where(and(eq(orders.id, order.id), eq(orders.paymentReference, reference), ne(orders.status, 'cancelled')))
+        .returning({ id: orders.id })
+      if (!saved) throw new Error('The order was cancelled.')
       return { url }
     } catch {
       const current = await findAccessibleOrder(data.code, customer)
       if (current?.paidAt) return { url: callback.href }
+      if (current?.status === 'cancelled') throw new Error('This order was cancelled.')
       if (current?.paymentUrl) return { url: current.paymentUrl }
       // Keep this reference on uncertain failures so a retry cannot charge another transaction.
       throw new Error('Couldn’t open checkout. Your order is saved.')

@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { getCookie } from '@tanstack/react-start/server'
 import { and, desc, eq, exists, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
@@ -56,6 +57,8 @@ import {
   softwareWorkFee,
 } from './pricing'
 import { supportNameRequired } from './support-name'
+import { referralCookie } from './wallet'
+import { captureFirstOrderReferral, rewardApprovedReferral } from './wallet.server'
 
 const levelIds = academicLevels.map((l) => l.id) as [string, ...string[]]
 const deadlineIds = deadlines.map((d) => d.id) as [string, ...string[]]
@@ -136,6 +139,7 @@ export const createOrder = createServerFn({ method: 'POST' })
       }
       const priceCents = discount ? discountedTotalCents(originalCents, discount.percent) : originalCents
       if (discount && priceCents < MIN_CHECKOUT_CENTS) throw new Error(minimumDiscountMessage)
+      await captureFirstOrderReferral(tx, context.user.id, getCookie(referralCookie))
       const placedAt = new Date()
       const [row] = await tx
         .insert(orders)
@@ -250,6 +254,8 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
     const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     const { status } = data
+    if (order.paidAt && order.refundedCents >= order.priceCents && status !== 'cancelled')
+      throw new Error('A fully refunded order stays cancelled.')
     if (status === order.status && status !== 'completed') return { ok: true }
     if (order.status !== data.currentStatus ||
       (data.deliveryVersion !== undefined && data.deliveryVersion !== order.deliveryVersion))
@@ -300,6 +306,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
           eq(orders.status, data.currentStatus),
           eq(orders.deliveryVersion, order.deliveryVersion),
           eq(orders.detailsRevision, order.detailsRevision),
+          eq(orders.refundedCents, order.refundedCents),
           status === 'paid' ? isNotNull(orders.paidAt) : undefined,
           status === 'cancelled' || status === 'awaiting-payment' ? isNull(orders.paidAt) : undefined,
           status === 'cancelled' ? isNull(orders.paymentReference) : undefined,
@@ -569,6 +576,7 @@ export const approveOrder = createServerFn({ method: 'POST' })
         isNotNull(orderFiles.deliveredAt),
         isNull(orderFiles.releasedAt),
       ))
+      await rewardApprovedReferral(tx, context.user.id, order.id)
     })
     return { ok: true }
   })

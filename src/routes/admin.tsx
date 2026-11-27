@@ -5,7 +5,7 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, CreditCard, Gift, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
+import { Bell, ClipboardList, CreditCard, Gift, MessageSquare, Package, Shield, Star, UserRound, Users } from 'lucide-react'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -21,6 +21,7 @@ import { StaffCustomers } from '@/components/staff-customers'
 import { StaffOrderDetails } from '@/components/staff-order-details'
 import { StaffOrderEmail } from '@/components/staff-order-email'
 import { StaffOrderPrice } from '@/components/staff-order-price'
+import { StaffOrderRequests } from '@/components/staff-order-requests'
 import { StaffFeedback } from '@/components/staff-feedback'
 import { StaffNotifications } from '@/components/staff-notifications'
 import { StaffOrderStatus } from '@/components/staff-order-status'
@@ -50,7 +51,7 @@ import { cn } from '@/lib/utils'
 
 const searchSchema = z.object({
   tab: z
-    .enum(['chat', 'orders', 'customers', 'feedback', 'notifications', 'campaigns', 'admins', 'payment-test', 'profile'])
+    .enum(['chat', 'orders', 'customers', 'requests', 'feedback', 'notifications', 'campaigns', 'admins', 'payment-test', 'profile'])
     .optional()
     .catch(undefined),
   customer: z.string().min(1).max(128).optional().catch(undefined),
@@ -62,6 +63,7 @@ const searchSchema = z.object({
 const staffPages = [
   { key: 'chat', label: 'Website chat', Icon: MessageSquare },
   { key: 'orders', label: 'Orders', Icon: Package },
+  { key: 'requests', label: 'Order requests', Icon: ClipboardList },
   { key: 'customers', label: 'Customers', Icon: Users },
   { key: 'feedback', label: 'Feedback', Icon: Star },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
@@ -146,6 +148,9 @@ function Admin() {
                 <Icon /> {label}
                 {key === 'chat' && <UnreadBadge count={counts?.website} />}
                 {key === 'orders' && <UnreadBadge count={counts?.ordersTotal} />}
+                {key === 'requests' && Boolean(counts?.pendingRequests) && (
+                  <span className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground">{counts?.pendingRequests} pending</span>
+                )}
               </Link>
             </Button>
           ))}
@@ -159,6 +164,7 @@ function Admin() {
       {tab === 'admins' && canManageStaff && <StaffAdmins />}
       {tab === 'feedback' && <StaffFeedback />}
       {tab === 'campaigns' && <StaffCampaigns key={customer ?? 'all'} codes={discounts} customerId={customer} />}
+      {tab === 'requests' && <StaffOrderRequests key={order ?? 'all'} code={order} />}
       {tab === 'profile' && <StaffProfile avatarId={avatarId} supportName={supportName} />}
       {tab === 'payment-test' && <StaffPaymentTest key={testRef ?? 'new'} reference={testRef} />}
       {tab === 'notifications' && <StaffNotifications key={`${customer ?? ''}:${order ?? ''}`} customerId={customer} orderCode={order} />}
@@ -406,6 +412,9 @@ function StaffOrders({
                   >
                     Customer profile
                   </Link>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/admin" search={{ tab: 'requests', order: order.code }}>Order requests</Link>
                 </Button>
                 <Button size="sm" variant="outline" asChild>
                   <Link

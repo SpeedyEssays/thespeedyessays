@@ -10,11 +10,15 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import type { Extras, OrderService, PriceAdjustment } from '../src/lib/pricing'
 import type { OrderLanguage, OrderSoftware } from '../src/lib/order-requirements'
 import type { NotificationKind } from '../src/lib/portal-notifications'
+import type { OrderRequestKind, OrderRequestStatus } from '../src/lib/order-requests'
+import type { WalletEntryKind } from '../src/lib/wallet'
 
 // Orders placed by signed-in clients. Price is recomputed on the server from
 // src/lib/pricing.ts and stored in cents.
@@ -54,6 +58,7 @@ export const orders = pgTable(
     instructions: text().notNull().default(''),
     paymentMethod: text('payment_method').notNull(),
     priceCents: integer('price_cents').notNull(),
+    refundedCents: integer('refunded_cents').notNull().default(0),
     priceAdjustment: jsonb('price_adjustment').$type<PriceAdjustment>(),
     status: text().notNull().default('awaiting-payment'),
     originalityScore: integer('originality_score'),
@@ -67,6 +72,7 @@ export const orders = pgTable(
   (t) => [
     index('orders_user_id_idx').on(t.userId),
     check('orders_software_fee_valid', sql`${t.softwareFeeCents} >= 0`),
+    check('orders_refund_valid', sql`${t.refundedCents} between 0 and ${t.priceCents}`),
   ],
 )
 
@@ -108,7 +114,7 @@ export const customerNotifications = pgTable.withRLS(
     readAt: timestamp('read_at', { withTimezone: true }),
   },
   (t) => [
-    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer', 'payment-reminder', 'price-offer')`),
+    check('customer_notifications_kind_valid', sql`${t.kind} in ('notice', 'offer', 'payment-reminder', 'price-offer', 'wallet-credit')`),
     index('customer_notifications_broadcast_idx').on(t.broadcastId).where(sql`${t.broadcastId} is not null`),
     index('customer_notifications_user_sent_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
     index('customer_notifications_unread_idx').on(t.userId).where(sql`${t.readAt} is null`),
@@ -124,6 +130,67 @@ export const discountCodes = pgTable.withRLS('discount_codes', {
 }, (t) => [
   check('discount_codes_percent_valid', sql`${t.percent} between 1 and 99`),
   check('discount_codes_format_valid', sql`${t.code} ~ '^[A-Z0-9][A-Z0-9_-]{2,31}$'`),
+])
+
+export const walletAccounts = pgTable.withRLS('wallet_accounts', {
+  userId: text('user_id').primaryKey(),
+  referralCode: uuid('referral_code').notNull().defaultRandom().unique(),
+  referredBy: text('referred_by').references((): AnyPgColumn => walletAccounts.userId, { onDelete: 'set null' }),
+  balanceCents: integer('balance_cents').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('wallet_balance_nonnegative', sql`${t.balanceCents} >= 0`),
+  check('wallet_no_self_referral', sql`${t.userId} <> ${t.referredBy}`),
+  index('wallet_accounts_referred_by_idx').on(t.referredBy),
+])
+
+export const walletEntries = pgTable.withRLS('wallet_entries', {
+  id: uuid().primaryKey().defaultRandom(),
+  eventKey: text('event_key').notNull().unique(),
+  userId: text('user_id').notNull().references(() => walletAccounts.userId),
+  kind: text().$type<WalletEntryKind>().notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  description: text().notNull(),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('wallet_entries_sign_valid', sql`(${t.kind} = 'order-payment' and ${t.amountCents} < 0) or
+    (${t.kind} in ('referral-reward', 'staff-reward', 'top-up', 'order-refund') and ${t.amountCents} > 0)`),
+  index('wallet_entries_user_created_idx').on(t.userId, t.createdAt.desc(), t.id),
+])
+
+export const walletTopUps = pgTable.withRLS('wallet_top_ups', {
+  reference: text().primaryKey(),
+  userId: text('user_id').notNull().references(() => walletAccounts.userId),
+  amountCents: integer('amount_cents').notNull(),
+  paymentUrl: text('payment_url'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check('wallet_top_ups_positive', sql`${t.amountCents} > 0`),
+  index('wallet_top_ups_user_pending_idx').on(t.userId, t.createdAt.desc()).where(sql`${t.paidAt} is null`),
+])
+
+export const orderRequests = pgTable.withRLS('order_requests', {
+  id: uuid().primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  kind: text().$type<OrderRequestKind>().notNull(),
+  status: text().$type<OrderRequestStatus>().notNull().default('pending'),
+  reason: text().notNull(),
+  staffNote: text('staff_note'),
+  reviewedBy: text('reviewed_by'),
+  amountCents: integer('amount_cents'),
+  providerRefundId: text('provider_refund_id').unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+}, (t) => [
+  check('order_requests_kind_valid', sql`${t.kind} in ('cancellation', 'refund')`),
+  check('order_requests_status_valid', sql`${t.status} in ('pending', 'approved', 'declined')`),
+  check('order_requests_amount_valid', sql`case when ${t.kind} = 'refund' and ${t.status} = 'approved'
+    then ${t.amountCents} is not null and ${t.amountCents} > 0 else ${t.amountCents} is null end`),
+  index('order_requests_order_created_idx').on(t.orderId, t.createdAt.desc()),
+  index('order_requests_status_created_idx').on(t.status, t.createdAt.desc()),
+  uniqueIndex('order_requests_one_pending').on(t.orderId, t.kind).where(sql`${t.status} = 'pending'`),
 ])
 
 export const orderFiles = pgTable(

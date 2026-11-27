@@ -5,11 +5,12 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, MessageSquare, Package, Plus } from 'lucide-react'
+import { Bell, MessageSquare, Package, Plus, Wallet } from 'lucide-react'
 import { PortalShell } from '@/components/portal-shell'
 import { UnreadBadge } from '@/components/chat-indicators'
 import { SupportChat } from '@/components/chat-widget'
 import { CustomerNotifications } from '@/components/customer-notifications'
+import { CustomerWallet } from '@/components/customer-wallet'
 import { Button } from '@/components/ui/button'
 import { OrderDeadline } from '@/components/order-deadline'
 import { OrderPanel } from '@/components/order-panel'
@@ -18,6 +19,9 @@ import { getCustomerInboxCounts } from '@/lib/chat.functions'
 import { getServerUser } from '@/lib/identity.functions'
 import { listMyOrders } from '@/lib/orders.functions'
 import { refreshPayment } from '@/lib/payments.functions'
+import { formatUSD } from '@/lib/pricing'
+import { getMyWallet, getMyWalletBalance } from '@/lib/wallet.functions'
+import { walletReferencePattern } from '@/lib/wallet'
 import { canCheckout, statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
@@ -48,8 +52,9 @@ const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { order?: string; reference?: string; paymentExit?: 'closed'; tab?: 'chat' | 'notifications' } => ({
-    tab: search.tab === 'chat' || search.tab === 'notifications' ? search.tab : undefined,
+  ): { order?: string; reference?: string; walletReference?: string; paymentExit?: 'closed'; tab?: 'chat' | 'notifications' | 'wallet' } => ({
+    tab: search.tab === 'chat' || search.tab === 'notifications' || search.tab === 'wallet' ? search.tab : undefined,
+    walletReference: typeof search.walletReference === 'string' && walletReferencePattern.test(search.walletReference) ? search.walletReference : undefined,
     order: typeof search.order === 'string' ? search.order : undefined,
     paymentExit: search.paymentExit === 'closed' ? 'closed' : undefined,
     reference:
@@ -69,12 +74,15 @@ export const Route = createFileRoute('/dashboard')({
       throw redirect({ to: '/account', search: { next: location.href, denied: true } })
     return { user }
   },
-  loader: async () => {
-    const [orders, displayName] = await Promise.all([
+  loaderDeps: ({ search }) => ({ walletTab: search.tab === 'wallet' }),
+  loader: async ({ deps }) => {
+    const [orders, displayName, wallet, balanceCents] = await Promise.all([
       listMyOrders(),
       getMyDisplayName(),
+      deps.walletTab ? getMyWallet() : null,
+      deps.walletTab ? null : getMyWalletBalance(),
     ])
-    return { orders, displayName }
+    return { orders, displayName, wallet, balanceCents: wallet?.balanceCents ?? balanceCents ?? 0 }
   },
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({
@@ -90,9 +98,9 @@ function Dashboard() {
   const { user } = Route.useRouteContext()
   useCustomerActivity(!user.isAdmin)
   const { data: counts, refresh: refreshUnread } = useInboxData(getCustomerInboxCounts)
-  const { orders, displayName } = Route.useLoaderData()
+  const { orders, displayName, wallet, balanceCents } = Route.useLoaderData()
   const now = useOrderClock()
-  const { order, reference, paymentExit, tab } = Route.useSearch()
+  const { order, reference, walletReference, paymentExit, tab } = Route.useSearch()
   const router = useRouter()
   const [paymentNotice, setPaymentNotice] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -171,6 +179,11 @@ function Dashboard() {
             <MessageSquare /> Live chat <UnreadBadge count={counts?.website} />
           </Link>
         </Button>
+        <Button variant={tab === 'wallet' ? 'default' : 'ghost'} asChild>
+          <Link to="/dashboard" search={{ tab: 'wallet' }} aria-current={tab === 'wallet' ? 'page' : undefined}>
+            <Wallet /> Wallet · {formatUSD(balanceCents / 100)}
+          </Link>
+        </Button>
         <Button variant={tab === 'notifications' ? 'default' : 'ghost'} asChild>
           <Link
             to="/dashboard"
@@ -181,7 +194,9 @@ function Dashboard() {
           </Link>
         </Button>
       </nav>
-      {tab === 'notifications' ? (
+      {tab === 'wallet' && wallet ? (
+        <CustomerWallet wallet={wallet} reference={walletReference} checkoutClosed={paymentExit === 'closed'} />
+      ) : tab === 'notifications' ? (
         <CustomerNotifications unread={counts?.notifications ?? 0} onRead={refreshUnread} />
       ) : tab === 'chat' ? (
         <section
@@ -236,6 +251,7 @@ function Dashboard() {
                 key={selected.code}
                 order={selected}
                 now={now}
+                walletBalanceCents={balanceCents}
                 onRead={refreshUnread}
               />
             </div>

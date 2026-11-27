@@ -59,6 +59,7 @@ function toView(
     placedAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     price: row.priceCents / 100,
+    refundedCents: row.refundedCents,
     priceAdjustment: row.priceAdjustment,
     paymentMethod: row.paymentMethod,
     checkoutStarted: !!row.paymentReference,

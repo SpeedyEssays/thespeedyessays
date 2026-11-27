@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
+import { z } from 'zod'
 import {
   acceptInvite,
   handleAuthCallback,
@@ -89,6 +90,7 @@ export const Route = createFileRoute('/account')({
     signup?: boolean
     denied?: boolean
     google?: boolean
+    ref?: string
   } => ({
     next:
       typeof search.next === 'string'
@@ -97,6 +99,7 @@ export const Route = createFileRoute('/account')({
     signup: search.signup === true ? true : undefined,
     denied: search.denied === true ? true : undefined,
     google: search.google === true ? true : undefined,
+    ref: z.uuid().safeParse(search.ref).data,
   }),
   head: () => ({
     meta: [
@@ -104,7 +107,7 @@ export const Route = createFileRoute('/account')({
       { name: 'robots', content: 'noindex' },
     ],
   }),
-  remountDeps: ({ search }) => [search.signup, search.next],
+  remountDeps: ({ search }) => [search.signup, search.next, search.ref],
   component: Account,
 })
 
@@ -114,6 +117,7 @@ function Account() {
     signup: startSignup,
     denied,
     google: googleCallback,
+    ref,
   } = Route.useSearch()
   const staff = /^\/admin(?:\?|$)/.test(next)
   const [mode, setMode] = useState<Mode>(
@@ -234,7 +238,10 @@ function Account() {
     setNotice('')
     try {
       if (mode === 'signup') {
-        await signup(email.trim(), password, { full_name: name.trim() })
+        await signup(email.trim(), password, {
+          full_name: name.trim(),
+          ...(ref ? { speedy_referral: ref } : {}),
+        })
         setMode('login')
         setPassword('')
         setNotice('Check your email for a confirmation link, then sign in.')

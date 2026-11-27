@@ -1,8 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { and, eq, isNull, ne, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
-import { orders } from '../../db/schema'
+import { orderFiles, orders } from '../../db/schema'
 
 export const currency = 'USD'
 export const paymentReferenceSchema = z.string().regex(/^se-[0-9a-f-]{36}$/)
@@ -28,6 +28,18 @@ export function paystackConfig() {
     return null
   }
   return { key, origin }
+}
+
+export async function requireOrderPaymentBrief(
+  db: Pick<ReturnType<typeof getDb>, 'select'>,
+  order: Pick<typeof orders.$inferSelect, 'id' | 'instructions'>,
+) {
+  if (order.instructions.length >= 20) return
+  const [brief] = await db.select({ id: orderFiles.id })
+    .from(orderFiles)
+    .where(and(eq(orderFiles.orderId, order.id), eq(orderFiles.kind, 'brief')))
+    .limit(1)
+  if (!brief) throw new Error('Upload your brief in the dashboard before paying.')
 }
 
 export async function paystackRequest(
@@ -121,34 +133,10 @@ export async function reconcilePayment(
     .where(eq(orders.paymentReference, reference))
   if (!order) return false
   if (order.paidAt) return true
-  if (order.status === 'cancelled') return false
-  const result = z
-    .object({
-      domain: z.literal('live'),
-      reference: z.string(),
-      amount: z.number().int(),
-      currency: z.string(),
-      status: z.string(),
-    })
-    .parse(
-      await paystackRequest(
-        `/transaction/verify/${encodeURIComponent(reference)}`,
-        config.key,
-      ),
-    )
-  if (result.status !== 'success') {
-    if (requireSuccess)
-      throw new Error('Payment confirmation is still pending.')
-    return false
-  }
-  if (
-    result.reference !== reference ||
-    result.amount !== order.priceCents ||
-    result.currency !== currency
-  ) {
-    throw new Error('The payment does not match the order.')
-  }
+  if (!await verifyUSDCharge(config.key, reference, order.priceCents, requireSuccess)) return false
   const now = new Date()
+  // A checkout can settle just after cancellation. Record its payment so the
+  // customer can request a refund, while leaving the order cancelled.
   const [recorded] = await db
     .update(orders)
     .set({
@@ -160,8 +148,7 @@ export async function reconcilePayment(
       and(
         eq(orders.id, order.id),
         eq(orders.paymentReference, reference),
-        eq(orders.priceCents, result.amount),
-        ne(orders.status, 'cancelled'),
+        eq(orders.priceCents, order.priceCents),
         isNull(orders.paidAt),
       ),
     )
@@ -172,6 +159,61 @@ export async function reconcilePayment(
     .from(orders)
     .where(and(eq(orders.id, order.id), eq(orders.paymentReference, reference)))
   return Boolean(current?.paidAt)
+}
+
+export async function verifyUSDCharge(
+  key: string, reference: string, amountCents: number, requireSuccess = false,
+) {
+  const result = z
+    .object({
+      domain: z.literal('live'),
+      reference: z.string(),
+      amount: z.number().int(),
+      currency: z.string(),
+      status: z.string(),
+    })
+    .parse(
+      await paystackRequest(
+        `/transaction/verify/${encodeURIComponent(reference)}`,
+        key,
+      ),
+    )
+  if (result.status !== 'success') {
+    if (requireSuccess)
+      throw new Error('Payment confirmation is still pending.')
+    return false
+  }
+  if (
+    result.reference !== reference ||
+    result.amount !== amountCents ||
+    result.currency !== currency
+  ) {
+    throw new Error('The payment does not match the order.')
+  }
+  return true
+}
+
+export async function verifyPaystackRefund(id: string, reference: string, paidCents: number) {
+  const config = paystackConfig()
+  if (!config) throw new Error('Paystack is unavailable. Try verifying the refund again later.')
+  const [refundData, chargeData] = await Promise.all([
+    paystackRequest(`/refund/${encodeURIComponent(id)}`, config.key),
+    paystackRequest(`/transaction/verify/${encodeURIComponent(reference)}`, config.key),
+  ])
+  const refund = z.object({
+    id: z.number().int().positive(), transaction: z.number().int().positive(),
+    domain: z.literal('live'), currency: z.literal(currency),
+    amount: z.number().int().positive(), status: z.string(),
+  }).safeParse(refundData).data
+  const charge = z.object({
+    id: z.number().int().positive(), reference: z.literal(reference),
+    domain: z.literal('live'), currency: z.literal(currency), amount: z.literal(paidCents),
+  }).safeParse(chargeData).data
+  if (!refund || !charge || String(refund.id) !== id || refund.transaction !== charge.id)
+    throw new Error('That refund does not match this order’s payment.')
+  if (refund.status !== 'processed')
+    throw new Error('Paystack has not confirmed the refund as processed yet.')
+  return { id: String(refund.id), amountCents: refund.amount }
 }
 
 function matchesSignature(expected: Buffer, value: string) {

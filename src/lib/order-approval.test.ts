@@ -5,6 +5,7 @@ const session = vi.hoisted(() => ({
   releaseFiles: vi.fn(),
   approve: vi.fn(),
   findOrder: vi.fn(),
+  rewardReferral: vi.fn(),
   saveRevision: vi.fn(),
   recordRevision: vi.fn(),
 }));
@@ -34,6 +35,10 @@ vi.mock("./identity.functions", () => ({
 }));
 vi.mock("./customers.server", () => ({ readCustomerProfile: vi.fn() }));
 vi.mock("./order-records", () => ({ findAccessibleOrder: session.findOrder }));
+vi.mock("./wallet.server", () => ({
+  captureFirstOrderReferral: vi.fn(),
+  rewardApprovedReferral: session.rewardReferral,
+}));
 vi.mock("../../db", () => ({
   getDb: () => ({
     transaction: async (transaction: (tx: object) => Promise<void>) =>
@@ -81,6 +86,11 @@ it("allows the customer to approve their own delivered order", async () => {
     isAdmin: false,
   });
   expect(session.releaseFiles).toHaveBeenCalledOnce();
+  expect(session.rewardReferral).toHaveBeenCalledExactlyOnceWith(
+    expect.anything(),
+    "order-owner",
+    1,
+  );
 });
 
 it("limits customer approval to the order owner", async () => {
@@ -88,6 +98,7 @@ it("limits customer approval to the order owner", async () => {
   await expect(approveOrder({ data })).rejects.toThrow("Order not found.");
   expect(session.approve).not.toHaveBeenCalled();
   expect(session.releaseFiles).not.toHaveBeenCalled();
+  expect(session.rewardReferral).not.toHaveBeenCalled();
 });
 
 it("persists a new deadline with an overdue customer's revision request", async () => {

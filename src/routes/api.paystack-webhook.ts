@@ -1,10 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { paymentReferenceSchema, reconcilePayment, verifyPaystackSignature } from '@/lib/payments.server'
+import { walletReferencePattern } from '@/lib/wallet'
+import { reconcileWalletTopUp } from '@/lib/wallet-payments.server'
 
 const successfulCharge = z.object({
   event: z.literal('charge.success'),
-  data: z.object({ reference: paymentReferenceSchema }),
+  data: z.object({ reference: z.union([paymentReferenceSchema, z.string().regex(walletReferencePattern)]) }),
 })
 
 export const Route = createFileRoute('/api/paystack-webhook')({
@@ -23,7 +25,9 @@ export const Route = createFileRoute('/api/paystack-webhook')({
         const event = successfulCharge.safeParse(payload)
         if (!event.success) return new Response(null, { status: 200 })
         try {
-          await reconcilePayment(event.data.data.reference, true)
+          const { reference } = event.data.data
+          if (walletReferencePattern.test(reference)) await reconcileWalletTopUp(reference, true)
+          else await reconcilePayment(reference, true)
           return new Response(null, { status: 200 })
         } catch {
           return new Response(null, { status: 503 })

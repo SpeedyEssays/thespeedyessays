@@ -49,7 +49,7 @@ export async function login(email: string, password: string) {
 export async function signup(
   email: string,
   password: string,
-  data: { full_name: string },
+  data: { full_name: string; speedy_referral?: string },
 ) {
   if (!useSupabase) return netlify.signup(email, password, data)
   const { error } = await auth().signUp({

@@ -177,6 +177,7 @@ export type OrderView = {
   placedAt: string
   updatedAt: string
   price: number
+  refundedCents: number
   priceAdjustment: PriceAdjustment | null
   paymentMethod: string
   paidAt: string | null

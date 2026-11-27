@@ -126,8 +126,13 @@ function NotificationPage({
           {data.entries.map((entry) => {
             const paymentReminder = entry.kind === "payment-reminder";
             const priceOffer = entry.kind === "price-offer";
+            const walletCredit = entry.kind === "wallet-credit";
             const offer = priceOffer || entry.kind === "offer";
-            const Icon = paymentReminder ? CreditCard : offer ? Gift : Bell;
+            const Icon = paymentReminder
+              ? CreditCard
+              : offer || walletCredit
+                ? Gift
+                : Bell;
             return (
               <li
                 key={entry.id}
@@ -149,13 +154,15 @@ function NotificationPage({
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="font-semibold text-foreground">
-                      {priceOffer
-                        ? "Special price"
-                        : paymentReminder
-                          ? "Payment reminder"
-                          : entry.kind === "offer"
-                            ? "Offer"
-                            : "Update"}
+                      {walletCredit
+                        ? "Wallet credit"
+                        : priceOffer
+                          ? "Special price"
+                          : paymentReminder
+                            ? "Payment reminder"
+                            : entry.kind === "offer"
+                              ? "Offer"
+                              : "Update"}
                     </span>
                     {!entry.readAt && (
                       <span className="rounded-full bg-primary px-2 py-0.5 font-medium text-primary-foreground">
@@ -198,6 +205,15 @@ function NotificationPage({
                     <OrderPayment code={entry.orderCode} />
                   )}
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {walletCredit && (
+                      <Link
+                        to="/dashboard"
+                        search={{ tab: "wallet" }}
+                        className="text-sm font-medium text-primary underline underline-offset-2"
+                      >
+                        View wallet
+                      </Link>
+                    )}
                     {entry.senderName && (
                       <span className="break-words text-xs text-muted-foreground">
                         From {entry.senderName} Support

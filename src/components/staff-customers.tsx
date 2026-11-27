@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { OnlineDot, UnreadBadge } from '@/components/chat-indicators'
 import { StaffCustomerPresence } from '@/components/staff-customer-presence'
+import { StaffCustomerWallet } from '@/components/staff-customer-wallet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -279,6 +280,7 @@ function CustomerDetails({
               Save customer profile
             </Button>
           </form>
+          <div className="mt-4"><StaffCustomerWallet key={id} userId={id} /></div>
         </>
       )}
       {problem && (

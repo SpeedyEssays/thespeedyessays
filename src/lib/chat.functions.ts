@@ -11,6 +11,7 @@ import {
   customerNotifications,
   customerProfiles,
   orderMessages,
+  orderRequests,
   orders,
   staffAvatars,
 } from '../../db/schema'
@@ -371,7 +372,7 @@ export const getStaffInboxCounts = createServerFn({ method: 'GET' })
   .middleware([requireAdmin])
   .handler(async () => {
     const db = getDb()
-    const [website, orders, active] = await Promise.all([
+    const [website, orders, active, pending] = await Promise.all([
       db.select({ customerId: chatConversations.userId, unread: count() })
         .from(chatMessages)
         .innerJoin(chatConversations, eq(chatConversations.id, chatMessages.conversationId))
@@ -379,6 +380,7 @@ export const getStaffInboxCounts = createServerFn({ method: 'GET' })
         .groupBy(chatConversations.userId),
       unreadOrders(),
       db.select({ id: customerPresence.userId }).from(customerPresence).where(activeCustomer),
+      db.select({ total: count() }).from(orderRequests).where(eq(orderRequests.status, 'pending')),
     ])
     const customers = new Map<string, number>()
     for (const { customerId, unread } of [...website, ...orders]) {
@@ -388,6 +390,7 @@ export const getStaffInboxCounts = createServerFn({ method: 'GET' })
       ...inboxCounts(website.reduce((total, row) => total + row.unread, 0), orders),
       customers: Object.fromEntries(customers),
       onlineCustomers: active.map(({ id }) => id),
+      pendingRequests: pending[0]?.total ?? 0,
     }
   })
 

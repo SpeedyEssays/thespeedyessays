@@ -39,7 +39,7 @@ export const policies: Policy[] = [
       {
         heading: '4. How to request a refund',
         body: [
-          'Send a refund request in the order’s message thread within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence, such as your professor’s feedback or an originality report.',
+          'Open the order in your dashboard, select Cancellation and refund options, and choose Request a refund within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence in the order’s message thread.',
           'Our Quality Assurance team responds within 3 business days. You may be offered a free revision first, which you can accept or decline.',
         ],
       },

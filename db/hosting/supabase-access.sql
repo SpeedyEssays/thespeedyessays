@@ -14,6 +14,10 @@ alter table public.staff_avatars enable row level security;
 alter table public.order_feedback enable row level security;
 alter table public.customer_notifications enable row level security;
 alter table public.discount_codes enable row level security;
+alter table public.wallet_accounts enable row level security;
+alter table public.wallet_entries enable row level security;
+alter table public.wallet_top_ups enable row level security;
+alter table public.order_requests enable row level security;
 
 revoke all on public.orders, public.order_files, public.order_messages,
   public.chat_conversations, public.chat_messages, public.customer_presence,
@@ -23,5 +27,8 @@ revoke all on public.orders, public.order_files, public.order_messages,
 
 revoke all on sequence public.orders_id_seq, public.order_files_id_seq,
   public.order_messages_id_seq, public.chat_messages_id_seq from public, anon, authenticated;
+
+revoke all on public.wallet_accounts, public.wallet_entries, public.wallet_top_ups, public.order_requests
+  from public, anon, authenticated, service_role;
 
 commit;
