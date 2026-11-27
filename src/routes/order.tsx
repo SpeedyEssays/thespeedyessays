@@ -10,37 +10,97 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { PageShell } from '@/components/site/page-shell'
+import { PortalShell } from '@/components/portal-shell'
+import { DiscountCodeField } from '@/components/discount-code-field'
+import { OrderLengthField, OrderServiceField, PaperTypeField, SpeakerNotesField } from '@/components/order-options'
+import { OrderLanguageField, OrderSoftwareField } from '@/components/order-requirement-fields'
 import { getServerUser } from '@/lib/identity.functions'
 import { uploadOrderFile } from '@/lib/files.functions'
+import { discountCodeInput, inactiveDiscountMessage, minimumDiscountMessage, type DiscountQuote } from '@/lib/discount-codes'
+import { lookupDiscountCode } from '@/lib/discount-codes.functions'
 import { createOrder } from '@/lib/orders.functions'
-import { checkOrderFile, orderFileAccept } from '@/lib/orders'
+import { isCheckoutAvailable, startCheckout } from '@/lib/payments.functions'
+import { checkOrderFile, MAX_ORDER_FILES_PER_UPLOAD, orderFileAccept } from '@/lib/orders'
+import {
+  orderLanguages,
+  orderSoftware,
+  orderSoftwareIds,
+  selectedSoftware,
+  softwareSelectionError,
+  type OrderLanguage,
+  type OrderSoftware,
+  type SoftwareSelection,
+} from '@/lib/order-requirements'
 import {
   academicLevels,
   assignmentTypes,
+  assignmentTypeLabel,
   deadlines,
   estimatePrice,
   extraPrices,
   formatUSD,
+  formatOrderLength,
   formattingStyles,
+  lengthForAssignment,
+  maxOrderLength,
+  MIN_CHECKOUT_CENTS,
+  orderServiceIds,
+  orderServices,
+  parseOrderLength,
+  PRESENTATION_TYPE,
+  quoteLength,
   type AcademicLevelId,
+  type AssignmentType,
   type DeadlineId,
   type Extras,
+  type OrderLength,
+  type OrderService,
 } from '@/lib/pricing'
+import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { cn } from '@/lib/utils'
 
-type OrderSearch = { level?: AcademicLevelId; deadline?: DeadlineId; pages?: number }
+type OrderSearch = {
+  level?: AcademicLevelId
+  deadline?: DeadlineId
+  type?: AssignmentType
+  service?: OrderService
+  pages?: number
+  words?: number
+  slides?: number
+  software?: OrderSoftware
+  speakerNotes?: boolean
+  discount?: string
+}
 
 export const Route = createFileRoute('/order')({
   validateSearch: (search: Record<string, unknown>): OrderSearch => ({
     level: academicLevels.some((l) => l.id === search.level) ? (search.level as AcademicLevelId) : undefined,
     deadline: deadlines.some((d) => d.id === search.deadline) ? (search.deadline as DeadlineId) : undefined,
-    pages: Number.isFinite(Number(search.pages)) && Number(search.pages) > 0 ? Number(search.pages) : undefined,
+    type: assignmentTypes.find((type) => type === search.type),
+    service: orderServiceIds.find((service) => service === search.service),
+    software: orderSoftwareIds.find((software) => software === search.software),
+    pages: parseOrderLength(search.pages, 'pages'),
+    words: parseOrderLength(search.words, 'words'),
+    slides: search.type === PRESENTATION_TYPE
+      ? parseOrderLength(search.slides, 'slides')
+      : undefined,
+    speakerNotes: search.speakerNotes === true ? true : undefined,
+    discount: discountCodeInput.safeParse(search.discount).data,
   }),
   beforeLoad: async ({ location }) => {
     const user = await getServerUser()
     if (!user) throw redirect({ to: '/account', search: { next: location.href } })
+    if (user.isAdmin)
+      throw redirect({ to: '/account', search: { next: location.href, denied: true } })
     return { user }
+  },
+  loaderDeps: ({ search }) => ({ discount: search.discount }),
+  loader: async ({ deps }) => {
+    const [checkout, discount] = await Promise.all([
+      isCheckoutAvailable(),
+      deps.discount ? lookupDiscountCode({ data: deps.discount }).catch(() => null) : null,
+    ])
+    return { checkout, discount }
   },
   headers: () => ({ 'Cache-Control': 'private, no-store' }),
   head: () => ({ meta: [{ title: 'Place an order — SpeedyEssays' }] }),
@@ -52,13 +112,17 @@ const subjects = ['Nursing', 'Business', 'History', 'Psychology', 'Economics', '
 const steps = ['Assignment', 'Length & deadline', 'Instructions', 'Review'] as const
 
 type FormState = {
-  type: string
+  type: AssignmentType
+  service: OrderService
+  language: OrderLanguage
+  software: SoftwareSelection
+  softwareDetails: string
   subject: string
   topic: string
   level: AcademicLevelId
   style: string
   sources: string
-  pages: number
+  length: OrderLength
   deadline: DeadlineId
   extras: Extras
   instructions: string
@@ -68,31 +132,62 @@ type FormState = {
 
 function OrderPage() {
   const search = Route.useSearch()
+  const { checkout, discount: initialDiscount } = Route.useLoaderData()
+  const [discount, setDiscount] = useState<DiscountQuote | null>(initialDiscount)
   const [step, setStep] = useState(0)
   const { user } = Route.useRouteContext()
-  const [placed, setPlaced] = useState<{ code: string; failedFiles: string[] } | null>(null)
+  useCustomerActivity(!user.isAdmin)
+  const [placed, setPlaced] = useState<{
+    code: string
+    failedFiles: string[]
+    checkoutFailed: boolean
+  } | null>(null)
   const submission = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState<FormState>({
-    type: 'Essay',
+    type: search.type ?? 'Essay',
+    service: search.service ?? 'writing',
+    language: 'en-US',
+    software: search.software ?? 'none',
+    softwareDetails: '',
     subject: '',
     topic: '',
     level: search.level ?? 'undergraduate',
     style: 'APA 7',
     sources: '5',
-    pages: Math.min(200, search.pages ?? 3),
+    length: search.slides !== undefined
+      ? { unit: 'slides', amount: String(search.slides) }
+      : search.words !== undefined
+        ? { unit: 'words', amount: String(search.words) }
+        : search.pages !== undefined
+          ? { unit: 'pages', amount: String(search.pages) }
+          : lengthForAssignment(search.type ?? 'Essay', { unit: 'pages', amount: '3' }),
     deadline: search.deadline ?? '7d',
-    extras: {},
+    extras: { speakerNotes: search.speakerNotes },
     instructions: '',
     files: [],
     agree: false,
   })
-  const quote = estimatePrice(form)
+  const length = quoteLength(form.length)
+  const software = selectedSoftware(form.software)
+  const quote = estimatePrice({ ...form, ...length, software, discountPercent: discount?.percent })
+  const unitPrice = quote.slideCount === undefined ? quote.perPage : quote.perSlide
+  const validLength = parseOrderLength(form.length.amount, form.length.unit) !== undefined
+  const belowMinimum = Boolean(discount && Math.round(quote.total * 100) < MIN_CHECKOUT_CENTS)
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
     setErrors((e) => ({ ...e, [key]: '' }))
+  }
+
+  function selectAssignment(type: AssignmentType) {
+    setForm((previous) => ({
+      ...previous,
+      type,
+      length: lengthForAssignment(type, previous.length),
+    }))
+    setErrors((previous) => ({ ...previous, length: '' }))
   }
 
   function validate(s: number) {
@@ -100,26 +195,31 @@ function OrderPage() {
     if (s === 0) {
       if (!form.subject) e.subject = 'Choose a subject'
       if (form.topic.trim().length < 4) e.topic = 'Add a topic or working title'
+      const softwareError = softwareSelectionError(form.software, form.softwareDetails)
+      if (softwareError) e.software = softwareError
     }
+    if (s === 1 && !validLength)
+      e.length = `Enter 1 to ${maxOrderLength(form.length.unit).toLocaleString('en-US')} ${form.length.unit}.`
     if (s === 2 && form.instructions.trim().length < 20 && form.files.length === 0) {
       e.instructions = 'Add at least a sentence of instructions or upload your prompt'
     }
     if (s === 3) {
       if (!form.agree) e.agree = 'Please accept the terms to continue'
+      if (belowMinimum) e.discount = minimumDiscountMessage
     }
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
   function addFiles(files: File[]) {
-    if (files.some((file) => !checkOrderFile(file)) || form.files.length + files.length > 8) {
+    if (files.some((file) => !checkOrderFile(file)) || form.files.length + files.length > MAX_ORDER_FILES_PER_UPLOAD) {
       toast.error('Choose up to eight supported files, no larger than 4 MB each.')
       return
     }
     set('files', [...form.files, ...files])
   }
 
-  async function next() {
+  async function next(continueToPayment: boolean) {
     if (busy || !validate(step)) return
     if (step < steps.length - 1) {
       setStep(step + 1)
@@ -131,16 +231,23 @@ function OrderPage() {
     submission.current ??= crypto.randomUUID()
     try {
       const { code } = await createOrder({ data: {
-        type: form.type as (typeof assignmentTypes)[number],
+        type: form.type,
+        service: form.service,
+        language: form.language,
+        software,
+        softwareDetails: software === 'other' ? form.softwareDetails : undefined,
         style: form.style as (typeof formattingStyles)[number],
         topic: form.topic,
         subject: form.subject,
-        pages: form.pages,
+        pages: quote.pages,
+        wordCount: length.wordCount,
+        slideCount: length.slideCount,
         level: form.level,
         deadline: form.deadline,
         sources: Number(form.sources),
         instructions: form.instructions,
         extras: form.extras,
+        discountCode: discount?.code,
         agree: true,
         hasFiles: form.files.length > 0,
         submissionId: submission.current,
@@ -158,9 +265,20 @@ function OrderPage() {
           failedFiles.push(file.name)
         }
       }
-      setPlaced({ code, failedFiles })
-    } catch {
-      toast.error('Your order couldn’t be saved. Check your details or try again.')
+      let checkoutFailed = false
+      if (continueToPayment && failedFiles.length === 0) {
+        try {
+          const { url } = await startCheckout({ data: { code } })
+          window.location.assign(url)
+        } catch {
+          checkoutFailed = true
+        }
+      }
+      setPlaced({ code, failedFiles, checkoutFailed })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      toast.error([inactiveDiscountMessage, minimumDiscountMessage].includes(message)
+        ? message : 'Your order couldn’t be saved. Check your details or try again.')
     } finally {
       setBusy(false)
     }
@@ -168,14 +286,21 @@ function OrderPage() {
 
   if (placed) {
     return (
-      <PageShell>
+      <PortalShell>
         <div className="mx-auto max-w-reading px-4 py-20 text-center sm:px-6">
           <CheckCircle2 className="mx-auto size-14 text-success" />
           <h1 className="mt-6 text-4xl font-semibold">Order {placed.code} saved</h1>
           <p className="mt-4 text-muted-foreground">
-            Open your order in the dashboard to continue to payment.
+            Your order is listed under Awaiting payment. Return to it in your customer portal when
+            you’re ready to pay.
           </p>
-          {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them in your dashboard before paying. {placed.failedFiles.join(', ')}</p>}
+          {placed.checkoutFailed && (
+            <p className="mt-3 text-sm text-destructive" role="alert">
+              We couldn’t open checkout. You can try again from your saved order. Please contact
+              support if checkout still fails.
+            </p>
+          )}
+          {placed.failedFiles.length > 0 && <p className="mt-3 text-sm text-destructive" role="alert">These attachments could not be uploaded. Please add them from the order in your customer portal. {placed.failedFiles.join(', ')}</p>}
           <div className="mt-8 flex justify-center gap-3">
             <Button asChild>
               <Link to="/dashboard" search={{ order: placed.code }}>Open my order</Link>
@@ -185,12 +310,12 @@ function OrderPage() {
             </Button>
           </div>
         </div>
-      </PageShell>
+      </PortalShell>
     )
   }
 
   return (
-    <PageShell>
+    <PortalShell>
       <div className="paper-grain border-b">
         <div className="mx-auto max-w-content px-4 py-10 sm:px-6">
           <h1 className="text-3xl font-semibold sm:text-4xl">Place your order</h1>
@@ -229,7 +354,7 @@ function OrderPage() {
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            next()
+            void next(checkout)
           }}
           className="rounded-2xl border bg-card p-6 sm:p-8"
         >
@@ -237,18 +362,13 @@ function OrderPage() {
 
           {step === 0 && (
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field label="Type of assignment" id="type">
-                <Select value={form.type} onValueChange={(v) => set('type', v)}>
-                  <SelectTrigger id="type" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignmentTypes.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+              <OrderServiceField id="service" value={form.service} onChange={(service) => set('service', service)} />
+              <PaperTypeField id="type" value={form.type} onChange={selectAssignment} />
+              <OrderLanguageField
+                id="order-language"
+                value={form.language}
+                onChange={(language) => { if (language) set('language', language) }}
+              />
               <Field label="Subject" id="subject" error={errors.subject}>
                 <Select value={form.subject} onValueChange={(v) => set('subject', v)}>
                   <SelectTrigger id="subject" className="w-full" aria-invalid={!!errors.subject}>
@@ -307,22 +427,38 @@ function OrderPage() {
               <Field label="Number of sources" id="sources">
                 <Input id="sources" type="number" min={0} max={100} value={form.sources} onChange={(e) => set('sources', e.target.value)} />
               </Field>
+              <div className="sm:col-span-2">
+                <OrderSoftwareField
+                  id="order-software"
+                  value={form.software}
+                  fee={quote.softwareRate}
+                  onChange={(value) => set('software', value)}
+                  details={{ value: form.softwareDetails, onChange: (value) => {
+                    set('softwareDetails', value)
+                    setErrors((previous) => ({ ...previous, software: '' }))
+                  } }}
+                  error={errors.software}
+                />
+              </div>
             </div>
           )}
 
           {step === 1 && (
             <div className="space-y-6">
-              <Field label="Pages" id="pages" hint={`≈ ${quote.words.toLocaleString()} words, double-spaced`}>
-                <Input
-                  id="pages"
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={form.pages}
-                  onChange={(e) => set('pages', Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
-                  className="max-w-32"
-                />
-              </Field>
+              <OrderLengthField
+                id="order-length"
+                length={form.length}
+                onChange={(value) => {
+                  if (value.unit === 'slides') set('type', PRESENTATION_TYPE)
+                  set('length', value)
+                }}
+                quote={quote}
+                error={errors.length}
+              />
+              {form.length.unit === 'slides' && (
+                <SpeakerNotesField id="order-speaker-notes" checked={Boolean(form.extras.speakerNotes)}
+                  onChange={(speakerNotes) => set('extras', { ...form.extras, speakerNotes })} />
+              )}
               <fieldset>
                 <legend className="mb-2 text-sm font-medium">Deadline</legend>
                 <RadioGroup
@@ -331,7 +467,7 @@ function OrderPage() {
                   className="grid grid-cols-2 gap-2 sm:grid-cols-3"
                 >
                   {deadlines.map((d) => {
-                    const price = estimatePrice({ ...form, deadline: d.id, extras: {} }).base
+                    const price = estimatePrice({ ...form, ...length, software, deadline: d.id, extras: {} }).total
                     return (
                       <Label
                         key={d.id}
@@ -345,7 +481,7 @@ function OrderPage() {
                           <RadioGroupItem id={`dl-${d.id}`} value={d.id} />
                           {d.label}
                         </span>
-                        <span className="text-xs text-muted-foreground tabular-nums">{formatUSD(price)}</span>
+                        <span className="text-xs text-muted-foreground tabular-nums">{validLength ? formatUSD(price) : '—'}</span>
                       </Label>
                     )
                   })}
@@ -407,7 +543,7 @@ function OrderPage() {
                 >
                   <FileUp className="size-8 text-muted-foreground" />
                   <span className="mt-3 text-sm font-medium">Drag files here or click to browse</span>
-                  <span className="mt-1 text-xs text-muted-foreground">PDF, DOCX, PPTX, TXT, PNG or JPEG · up to 4 MB each</span>
+                  <span className="mt-1 text-xs text-muted-foreground">Documents, spreadsheets, images, media and archives · up to 4 MB each</span>
                   <input
                     id="files"
                     type="file"
@@ -444,15 +580,24 @@ function OrderPage() {
           {step === 3 && (
             <div className="space-y-6">
               <dl className="grid gap-x-6 gap-y-3 rounded-xl bg-muted/50 p-5 text-sm sm:grid-cols-2">
-                <Summary label="Assignment" value={`${form.type} · ${form.subject}`} />
+                <Summary label="Assignment" value={`${assignmentTypeLabel(form.type)} · ${form.subject}`} />
+                <Summary label="Service" value={orderServices[form.service].label} />
                 <Summary label="Topic" value={form.topic} />
                 <Summary label="Level" value={academicLevels.find((l) => l.id === form.level)?.label} />
+                <Summary label="Language" value={orderLanguages[form.language]} />
+                <Summary label="Software" value={software === 'other' ? form.softwareDetails.trim() : software ? orderSoftware[software] : 'None required'} />
                 <Summary label="Style" value={`${form.style} · ${form.sources} sources`} />
-                <Summary label="Length" value={`${form.pages} pages (≈ ${quote.words.toLocaleString()} words)`} />
+                <Summary label="Length" value={formatOrderLength(quote.pages, length.wordCount, quote.slideCount)} />
+                {quote.speakerNotesFee > 0 && <Summary label="Speaker notes" value="Separate Word document" />}
                 <Summary label="Deadline" value={deadlines.find((d) => d.id === form.deadline)?.label} />
                 <Summary label="Attachments" value={form.files.length ? `${form.files.length} file(s)` : 'None'} />
               </dl>
-              <p className="text-sm">Ordering as <span className="font-medium">{user.email}</span>. After saving your order, open it in your dashboard to pay.</p>
+              <p className="text-sm">
+                Ordering as <span className="font-medium">{user.email}</span>.{' '}
+                {checkout
+                  ? 'Choose whether to pay now or return to the saved order later.'
+                  : 'You can view the saved order and contact support from your customer portal.'}
+              </p>
               <div>
                 <Label htmlFor="agree" className="flex items-start gap-3 font-normal">
                   <Checkbox id="agree" checked={form.agree} onCheckedChange={(c) => set('agree', c === true)} aria-invalid={!!errors.agree} />
@@ -468,21 +613,26 @@ function OrderPage() {
             </div>
           )}
 
-          <div className="mt-8 flex items-center justify-between gap-3 border-t pt-6">
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t pt-6">
             <Button type="button" variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={busy || step === 0}>
               <ArrowLeft /> Back
             </Button>
-            <Button type="submit" size="lg" disabled={busy}>
-              {step === steps.length - 1 ? (
-                <>
-                  {busy ? 'Saving order…' : 'Save order'}
-                </>
-              ) : (
-                <>
-                  Continue <ArrowRight />
-                </>
+            <div className="flex flex-wrap gap-3">
+              {step === steps.length - 1 && checkout && (
+                <Button type="button" variant="outline" size="lg" disabled={busy || belowMinimum} onClick={() => void next(false)}>
+                  Save and pay later
+                </Button>
               )}
-            </Button>
+              <Button type="submit" size="lg" disabled={busy || (step === steps.length - 1 && belowMinimum)}>
+                {step === steps.length - 1 ? (
+                  busy ? 'Saving order…' : checkout ? 'Continue to payment' : 'Save order'
+                ) : (
+                  <>
+                    Continue <ArrowRight />
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </form>
 
@@ -490,20 +640,33 @@ function OrderPage() {
           <div className="rounded-2xl border bg-card p-6">
             <h2 className="text-lg font-semibold">Order summary</h2>
             <dl className="mt-4 space-y-2 text-sm">
-              <Row label={`${quote.pages} page${quote.pages > 1 ? 's' : ''} × ${formatUSD(quote.perPage)}`} value={formatUSD(quote.base)} />
+              <Row label="Service" value={orderServices[form.service].label} />
+              {validLength && (
+                <Row
+                  label={`${formatOrderLength(quote.pages, null, quote.slideCount)} × ${formatUSD(unitPrice)}`}
+                  value={formatUSD(quote.base)}
+                />
+              )}
               {quote.extras > 0 && <Row label="Extras" value={formatUSD(quote.extras)} />}
+              {quote.softwareFee > 0 && <Row label="Software work" value={formatUSD(quote.softwareFee)} />}
+              {quote.speakerNotesFee > 0 && <Row label="Speaker notes (Word)" value={formatUSD(quote.speakerNotesFee)} />}
+              {quote.discount > 0 && !belowMinimum && <Row label="Discount" value={`−${formatUSD(quote.discount)}`} />}
               <Row label="Originality report" value="Free" />
               <Row label="Title page & bibliography" value="Free" />
               <Row label="Revisions (14 days)" value="Free" />
             </dl>
             <div className="mt-4 flex items-baseline justify-between border-t pt-4">
               <span className="font-medium">Total</span>
-              <span className="font-display text-3xl font-semibold tabular-nums">{formatUSD(quote.total)}</span>
+              <span className="font-display text-3xl font-semibold tabular-nums">{validLength && !belowMinimum ? formatUSD(quote.total) : '—'}</span>
+            </div>
+            <div className="mt-4 space-y-2 border-t pt-4">
+              <DiscountCodeField id="order-discount" discount={discount} onChange={setDiscount} initialCode={search.discount} disabled={busy} />
+              {belowMinimum && <p role="alert" className="text-sm text-destructive">{minimumDiscountMessage}</p>}
             </div>
           </div>
         </aside>
       </div>
-    </PageShell>
+    </PortalShell>
   )
 }
 

@@ -11,7 +11,11 @@ export const Route = createFileRoute('/samples')({
   head: () => ({
     meta: [
       { title: 'Sample papers — SpeedyEssays' },
-      { name: 'description', content: 'Download free sample papers in Nursing, Business, History, Psychology and more, written by SpeedyEssays writers.' },
+      {
+        name: 'description',
+        content:
+          'Download sample papers in health policy, data analytics, business, art history and more, written by SpeedyEssays writers.',
+      },
     ],
   }),
   component: SamplesPage,

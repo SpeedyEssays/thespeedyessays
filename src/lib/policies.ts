@@ -39,7 +39,7 @@ export const policies: Policy[] = [
       {
         heading: '4. How to request a refund',
         body: [
-          'Send a refund request in the order’s message thread within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence, such as your professor’s feedback or an originality report.',
+          'Open the order in your dashboard, select Cancellation and refund options, and choose Request a refund within 14 days of delivery (or within 14 days of the deadline for undelivered orders). Explain the reason and attach any supporting evidence in the order’s message thread.',
           'Our Quality Assurance team responds within 3 business days. You may be offered a free revision first, which you can accept or decline.',
         ],
       },
@@ -88,7 +88,7 @@ export const policies: Policy[] = [
     slug: 'privacy-policy',
     title: 'Privacy & Confidentiality Policy',
     summary: 'Your identity, your order details and your payment information are kept strictly private.',
-    updated: '2026-10-01',
+    updated: '2026-11-21',
     sections: [
       {
         heading: '1. What we collect',
@@ -119,6 +119,13 @@ export const policies: Policy[] = [
         body: [
           'You can request deletion of your account and all associated files at any time from your dashboard or by contacting support. Completed papers are deleted from our servers 90 days after delivery unless you ask us to keep them longer.',
           'We never sell your data. We use it only to provide our service, process payments and, if you opt in, send order-related updates.',
+        ],
+      },
+      {
+        heading: '6. Sign in with Google',
+        body: [
+          'If you choose to sign in with Google, Google provides your account identifier, email address and basic profile information, such as your name and profile photo, to Supabase Auth, our authentication provider.',
+          'Supabase Auth stores this information with your account to create or link your SpeedyEssays account and manage your sign-in sessions. SpeedyEssays uses your email address and name to identify your account, and authorized support staff can see these details when helping you.',
         ],
       },
     ],

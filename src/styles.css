@@ -38,6 +38,10 @@ code {
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.55 0.13 155);
+  --chat-customer: oklch(0.938 0.057 150);
+  --chat-customer-border: oklch(0.84 0.081 150);
+  --chat-support: oklch(0.937 0.038 250);
+  --chat-support-border: oklch(0.84 0.055 250);
   --border: oklch(0.9 0.015 85);
   --input: oklch(0.88 0.015 85);
   --ring: oklch(0.55 0.1 262);
@@ -58,6 +62,10 @@ code {
 }
 
 .dark {
+  --chat-customer: oklch(0.29 0.06 155);
+  --chat-customer-border: oklch(0.41 0.07 155);
+  --chat-support: oklch(0.29 0.06 251);
+  --chat-support-border: oklch(0.41 0.08 251);
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.141 0.005 285.823);
@@ -98,6 +106,10 @@ code {
   --container-content: var(--content-width);
   --container-reading: var(--reading-width);
   --color-background: var(--background);
+  --color-chat-customer: var(--chat-customer);
+  --color-chat-customer-border: var(--chat-customer-border);
+  --color-chat-support: var(--chat-support);
+  --color-chat-support-border: var(--chat-support-border);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);

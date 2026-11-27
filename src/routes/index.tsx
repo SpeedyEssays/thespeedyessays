@@ -20,6 +20,14 @@ import { PaymentBadges } from '@/components/site/trust-badges'
 import { reviews, samples, stats } from '@/lib/fixtures'
 
 export const Route = createFileRoute('/')({
+  head: () => ({
+    meta: [
+      {
+        name: 'google-site-verification',
+        content: 'Ri1HhidTlbFiyooF9TmKFEuFbBPqh5Gs_ke46eF9Rq0',
+      },
+    ],
+  }),
   component: Home,
 })
 
@@ -80,7 +88,7 @@ function Home() {
             >
               <Stars rating={5} />
               <span className="font-semibold">{stats.rating}/5</span>
-              <span className="text-muted-foreground">from {stats.reviewCount.toLocaleString()} verified reviews</span>
+              <span className="text-muted-foreground">from {stats.reviewCount.toLocaleString('en-US')} verified reviews</span>
             </a>
             <h1 className="text-4xl leading-[1.05] font-semibold sm:text-5xl lg:text-6xl">
               Academic writing help from writers who’ve <em className="text-primary/80">earned</em> their degrees.
@@ -124,8 +132,7 @@ function Home() {
       <section className="mx-auto grid max-w-content items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2">
         <div className="relative">
           <img
-            src="/.netlify/images?url=/img/hero-study.png&w=1100&fm=webp"
-            srcSet="/.netlify/images?url=/img/hero-study.png&w=640&fm=webp 640w, /.netlify/images?url=/img/hero-study.png&w=1100&fm=webp 1100w"
+            src="/img/hero-study.png"
             sizes="(min-width: 1024px) 560px, 100vw"
             alt="An open academic journal with handwritten notes, a fountain pen and a stack of books on a wooden desk"
             width={1264}

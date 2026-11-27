@@ -40,3 +40,5 @@ npm test
 ```
 
 Use the Netlify preview for hosted Identity, Blobs, and payment sandbox checks. See [PLAN.md](PLAN.md) for the wider marketplace roadmap.
+
+For the alternate hosting configuration, see [Cloudflare Workers and Supabase](db/hosting/README.md).

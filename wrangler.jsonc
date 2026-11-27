@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "app",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-11-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "keep_vars": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "AUTH_EMAIL_DELIVERY", "class_name": "AuthEmailDelivery" },
+      {
+        "name": "OFFER_CAMPAIGN_DELIVERY",
+        "class_name": "OfferCampaignDelivery",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "auth-email-delivery-v1",
+      "new_sqlite_classes": ["AuthEmailDelivery"],
+    },
+    {
+      "tag": "offer-campaign-delivery-v1",
+      "new_sqlite_classes": ["OfferCampaignDelivery"],
+    },
+  ],
+}

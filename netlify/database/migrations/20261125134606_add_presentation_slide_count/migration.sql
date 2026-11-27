@@ -1,0 +1,1 @@
+ALTER TABLE "orders" ADD COLUMN "slide_count" integer;
