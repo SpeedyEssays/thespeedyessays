@@ -4,7 +4,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import { getDb } from '../../db'
 import { orderFiles, orders } from '../../db/schema'
-import { requireUser } from './identity.functions'
+import { requireCustomer } from './identity.functions'
 import { findAccessibleOrder } from './order-records'
 import { canCheckout, orderCode } from './orders'
 import {
@@ -17,7 +17,7 @@ import {
 export const isCheckoutAvailable = createServerFn({ method: 'GET' }).handler(() => !!paystackConfig())
 
 export const startCheckout = createServerFn({ method: 'POST' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(z.object({ code: z.string().max(20) }))
   .handler(async ({ data, context }) => {
     const config = paystackConfig()
@@ -89,7 +89,7 @@ export const startCheckout = createServerFn({ method: 'POST' })
   })
 
 export const refreshPayment = createServerFn({ method: 'POST' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(
     z.union([z.object({ reference: paymentReferenceSchema }), z.object({ code: z.string().max(20) })]),
   )

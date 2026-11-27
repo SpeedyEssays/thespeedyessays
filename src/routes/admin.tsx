@@ -80,7 +80,7 @@ export const Route = createFileRoute('/admin')({
     if (!user.isAdmin) {
       throw redirect({
         to: '/account',
-        search: { next: '/admin', denied: true },
+        search: { next: location.href, denied: true },
       })
     }
     if (search.tab === 'admins' && !user.canManageStaff) {

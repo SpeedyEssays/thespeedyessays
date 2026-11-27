@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "@tanstack/react-router";
 
+import { LocalTime } from "@/components/local-time";
 import {
   StaffCustomerPicker,
   type StaffRecipient,
@@ -14,7 +15,13 @@ import {
   createDiscountCode,
   setDiscountCodeActive,
 } from "@/lib/discount-codes.functions";
-import { sendOfferEmail } from "@/lib/offer-email.functions";
+import {
+  getOfferCampaignProgress,
+  queueOfferCampaign,
+  resumeOfferCampaign,
+  sendOfferEmail,
+} from "@/lib/offer-email.functions";
+import { useInboxData } from "@/lib/use-inbox-data";
 
 type SavedCode = DiscountQuote & { active: boolean };
 
@@ -44,6 +51,7 @@ function OfferEmail({
   customerId?: string;
 }) {
   const [recipient, setRecipient] = useState<StaffRecipient | null>(null);
+  const [audience, setAudience] = useState<"one" | "all">("one");
   const [headline, setHeadline] = useState("");
   const [message, setMessage] = useState("");
   const [selectedCode, setSelectedCode] = useState("");
@@ -52,28 +60,54 @@ function OfferEmail({
   const [problem, setProblem] = useState("");
   const request = useRef<{ payload: string; id: string } | null>(null);
   const discount = codes.find((code) => code.code === selectedCode);
+  const {
+    data: campaign,
+    error: progressError,
+    refresh,
+  } = useInboxData(getOfferCampaignProgress, 10_000, audience === "all");
+  const campaignActive = campaign && campaign.status !== "complete";
+  const canSend = Boolean(
+    headline.trim() &&
+    message.trim() &&
+    (audience === "all" ? !campaignActive && !progressError : recipient),
+  );
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !recipient || !headline.trim() || !message.trim()) return;
+    if (busy || !canSend) return;
     const data = {
-      userId: recipient.id,
-      expectedRecipient: recipient.email,
       headline: headline.trim(),
       message: message.trim(),
       discountCode: discount?.code,
     };
-    const payload = JSON.stringify(data);
+    const payload = JSON.stringify([
+      audience,
+      audience === "one" ? recipient : null,
+      data,
+    ]);
     if (request.current?.payload !== payload)
       request.current = { payload, id: crypto.randomUUID() };
     setBusy(true);
     setNotice("");
     setProblem("");
     try {
-      await sendOfferEmail({
-        data: { ...data, requestId: request.current.id },
-      });
-      setNotice(`Offer email sent to ${recipient.email}.`);
+      const offer = { ...data, requestId: request.current.id };
+      if (audience === "all") {
+        const queued = await queueOfferCampaign({ data: offer });
+        setNotice(
+          `Campaign queued for ${queued.total} ${queued.total === 1 ? "customer" : "customers"}.`,
+        );
+        refresh();
+      } else if (recipient) {
+        await sendOfferEmail({
+          data: {
+            ...offer,
+            userId: recipient.id,
+            expectedRecipient: recipient.email,
+          },
+        });
+        setNotice(`Offer email sent to ${recipient.email}.`);
+      }
       request.current = null;
       setHeadline("");
       setMessage("");
@@ -88,6 +122,23 @@ function OfferEmail({
     }
   }
 
+  async function resume() {
+    setBusy(true);
+    setProblem("");
+    try {
+      await resumeOfferCampaign();
+      refresh();
+    } catch (error) {
+      setProblem(
+        error instanceof Error
+          ? error.message
+          : "Couldn’t resume the campaign.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section
       className="space-y-5 rounded-xl border bg-card p-5"
@@ -96,17 +147,112 @@ function OfferEmail({
       <h2 id="offer-email-heading" className="text-2xl font-semibold">
         Email an offer
       </h2>
-      <StaffCustomerPicker
-        recipient={recipient}
-        setRecipient={setRecipient}
-        customerId={customerId}
-        disabled={busy}
-      />
+      <fieldset disabled={busy} className="space-y-2">
+        <legend className="text-sm font-semibold">Send to</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              ["one", "One customer"],
+              ["all", "All customers"],
+            ] as const
+          ).map(([value, label]) => (
+            <label
+              key={value}
+              className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium has-checked:border-primary has-checked:bg-secondary"
+            >
+              <input
+                type="radio"
+                name="offer-audience"
+                value={value}
+                checked={audience === value}
+                onChange={() => {
+                  setAudience(value);
+                  setProblem("");
+                  setNotice("");
+                }}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {audience === "one" ? (
+        <StaffCustomerPicker
+          recipient={recipient}
+          setRecipient={setRecipient}
+          customerId={customerId}
+          disabled={busy}
+        />
+      ) : (
+        <div className="space-y-2 text-sm">
+          <p className="text-muted-foreground">
+            Each customer with a confirmed email receives their own copy.
+            Delivery continues in the background.
+          </p>
+          {progressError && (
+            <p role="status" className="text-destructive">
+              Campaign progress couldn’t load. Retrying…
+            </p>
+          )}
+          {campaign && (
+            <div className="space-y-2 rounded-lg border bg-background p-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <p className="font-semibold">
+                  {campaign.status === "complete"
+                    ? "Last campaign finished"
+                    : "Campaign delivery"}
+                </p>
+                <p className="tabular-nums text-muted-foreground">
+                  {campaign.sent} of {campaign.total} sent
+                </p>
+              </div>
+              <progress
+                className="h-2 w-full accent-success"
+                aria-label="Campaign recipients processed"
+                value={campaign.sent + campaign.skipped}
+                max={campaign.total}
+              />
+              {campaign.skipped > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {campaign.skipped} skipped because the account no longer has
+                  an eligible email.
+                </p>
+              )}
+              {campaign.nextAttemptAt !== null && (
+                <p className="text-xs text-muted-foreground">
+                  Next delivery attempt{" "}
+                  <LocalTime
+                    at={new Date(campaign.nextAttemptAt).toISOString()}
+                  />
+                  .
+                </p>
+              )}
+              {campaign.status === "paused" && (
+                <div className="space-y-2">
+                  <p className="text-xs text-destructive">
+                    Delivery paused. Check the Gmail sender, then resume
+                    sending.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void resume()}
+                  >
+                    Resume campaign
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <form
         className="space-y-4 border-t pt-4"
         onSubmit={(event) => void send(event)}
       >
-        {recipient && (
+        {audience === "one" && recipient && (
           <p className="break-all text-sm font-medium">To {recipient.email}</p>
         )}
         <fieldset disabled={busy} className="space-y-4">
@@ -175,11 +321,12 @@ function OfferEmail({
             </div>
           </details>
         )}
-        <Button
-          type="submit"
-          disabled={busy || !recipient || !headline.trim() || !message.trim()}
-        >
-          {busy ? "Sending…" : "Send offer email"}
+        <Button type="submit" disabled={busy || !canSend}>
+          {busy
+            ? "Please wait…"
+            : audience === "all"
+              ? "Send offer to all customers"
+              : "Send offer email"}
         </Button>
         {notice && (
           <p role="status" className="break-words text-sm text-success">

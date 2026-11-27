@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageCircle, Volume2, X } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { ChatThread } from '@/components/chat-thread'
 import { markVisitorChatRead, readVisitorChat, sendVisitorChat } from '@/lib/chat.functions'
+import { getServerUser } from '@/lib/identity.functions'
 import { getOnlineSupport } from '@/lib/staff-presence.functions'
 import { useInboxData } from '@/lib/use-inbox-data'
 
@@ -30,6 +32,7 @@ export function SupportChat({ onRead }: { onRead?: () => void }) {
 
 export function ChatWidget() {
   const [open, setOpen] = useState(false)
+  const [chatAccess, setChatAccess] = useState<'checking' | 'staff' | 'visitor'>('checking')
   const [showGreeting, setShowGreeting] = useState(false)
   const greetingTimer = useRef<number | undefined>(undefined)
   const audio = useRef<HTMLAudioElement>(null)
@@ -159,7 +162,15 @@ export function ChatWidget() {
               {supportName} is online
             </p>
           )}
-          <SupportChat />
+          {chatAccess === 'checking' ? (
+            <p role="status" className="text-sm text-muted-foreground">Opening chat…</p>
+          ) : chatAccess === 'staff' ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/admin" search={{ tab: 'chat' }}>Open staff chat inbox</Link>
+            </Button>
+          ) : (
+            <SupportChat />
+          )}
         </aside>
       )}
       <Button
@@ -169,7 +180,14 @@ export function ChatWidget() {
         aria-controls={open ? 'support-chat' : undefined}
         data-chat-control
         onClick={() => {
-          if (!open) playAlert()
+          if (!open) {
+            playAlert()
+            setChatAccess('checking')
+            void getServerUser().then(
+              (user) => setChatAccess(user?.isAdmin ? 'staff' : 'visitor'),
+              () => setChatAccess('visitor'),
+            )
+          }
           dismissGreeting()
           setOpen(!open)
         }}

@@ -108,8 +108,8 @@ export function StaffAdmins() {
       >
         <h2 className="text-2xl font-semibold">Add an admin</h2>
         <p className="text-sm text-muted-foreground">
-          Use the email on a confirmed SpeedyEssays account. Admins can view all
-          orders and customer chats.
+          Use a confirmed SpeedyEssays email. Granting admin access moves the
+          account to the Staff Portal, where admins can view orders and chats.
         </p>
         <div className="space-y-2">
           <Label htmlFor="grant-email">Account email</Label>

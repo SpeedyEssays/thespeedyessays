@@ -13,6 +13,7 @@ import {
   signup,
   type AccountEmailLinkType,
 } from '@/lib/account-client'
+import { customerAccountOnly, staffAccountOnly } from '@/lib/portal-access'
 import { useSupabase } from '@/lib/supabase-config'
 
 import { PageShell } from '@/components/site/page-shell'
@@ -116,7 +117,7 @@ function Account() {
   } = Route.useSearch()
   const staff = /^\/admin(?:\?|$)/.test(next)
   const [mode, setMode] = useState<Mode>(
-    startSignup && !staff ? 'signup' : 'login',
+    startSignup && !staff && !denied ? 'signup' : 'login',
   )
   const [emailLink, setEmailLink] = useState<AccountEmailLinkType | null>(null)
   const [pending, setPending] = useState<'email' | 'google' | null>(null)
@@ -335,11 +336,23 @@ function Account() {
     <PageShell>
       <main className="mx-auto max-w-md px-4 py-14 sm:px-6">
         <h1 className="text-4xl font-semibold">{title}</h1>
-        {staff && (
+        {denied ? (
+          <div className="mt-4 space-y-3 rounded-lg border border-destructive/30 bg-card p-4" role="alert">
+            <p className="text-sm font-medium text-destructive">
+              {staff ? customerAccountOnly : staffAccountOnly}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {staff ? 'Use a staff email to sign in here.' : 'Use a customer email to sign in here.'}
+            </p>
+            <Button size="sm" variant="outline" asChild>
+              <Link to={staff ? '/dashboard' : '/admin'}>
+                {staff ? 'Open Customer Portal' : 'Open Staff Portal'}
+              </Link>
+            </Button>
+          </div>
+        ) : staff && (
           <p className="mt-2 text-sm text-muted-foreground">
-            {denied
-              ? 'This account has customer access. Use a staff email, or ask the site owner to grant staff access.'
-              : 'Sign in with your staff account to see customer chats and orders.'}
+            Sign in with your staff account to see customer chats and orders.
           </p>
         )}
         {emailLink ? (

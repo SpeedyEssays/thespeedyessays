@@ -5,13 +5,13 @@ import { z } from "zod";
 import { getDb } from "../../db";
 import { customerNotifications, orders } from "../../db/schema";
 import { customerAccountSource, findCustomerAccount } from "./customers.server";
-import { requireAdmin, requireUser } from "./identity.functions";
+import { requireAdmin, requireCustomer } from "./identity.functions";
 import { findAccessibleOrder } from "./order-records";
 import { canCheckout, orderCode, orderIdFromCode } from "./orders";
 import { notificationKinds } from "./portal-notifications";
 
 export const listMyNotifications = createServerFn({ method: "GET" })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(z.object({ page: z.number().int().min(0).max(10000) }))
   .handler(async ({ data, context }) => {
     const pageSize = 20;
@@ -123,7 +123,7 @@ export const sendPaymentReminder = createServerFn({ method: "POST" })
   });
 
 export const markNotificationsRead = createServerFn({ method: "POST" })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(z.object({ id: z.uuid().optional() }))
   .handler(async ({ data, context }) => {
     await getDb()

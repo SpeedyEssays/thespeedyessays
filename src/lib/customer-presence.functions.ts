@@ -4,10 +4,10 @@ import {
   readCustomerPresence,
   touchCustomerPresence,
 } from "./customer-presence.server";
-import { requireAdmin, requireUser } from "./identity.functions";
+import { requireAdmin, requireCustomer } from "./identity.functions";
 
 export const recordPortalActivity = createServerFn({ method: "POST" })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .handler(async ({ context }) => {
     if (!context.user.isAdmin) await touchCustomerPresence(context.user.id);
     return null;

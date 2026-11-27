@@ -63,13 +63,13 @@ export function OrderPanel({
   )
   const send = useCallback(
     (body: string) =>
-      sendOrderMessage({ data: { code: order.code, body, asSupport: staff } }),
-    [order.code, staff],
+      sendOrderMessage({ data: { code: order.code, body } }),
+    [order.code],
   )
   const markRead = useCallback(
     (through: number) =>
-      markOrderMessagesRead({ data: { code: order.code, through, asSupport: staff } }),
-    [order.code, staff],
+      markOrderMessagesRead({ data: { code: order.code, through } }),
+    [order.code],
   )
 
   async function run(action: () => Promise<unknown>, message?: string) {

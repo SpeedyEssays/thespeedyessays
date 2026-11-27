@@ -1,13 +1,19 @@
 import app from "@tanstack/react-start/server-entry";
 import { withWorkerDatabase } from "../db";
 import { receiveAuthEmail } from "./lib/auth-email.server";
+import {
+  withOfferCampaignBinding,
+  type OfferCampaignBinding,
+} from "./lib/offer-campaign.server";
 
 export { AuthEmailDelivery } from "./lib/auth-email-delivery.server";
+export { OfferCampaignDelivery } from "./lib/offer-campaign-delivery.server";
 
 type Environment = {
   HYPERDRIVE?: { connectionString: string };
   DATABASE_URL?: string;
   REUSE_DATABASE_CONNECTIONS?: boolean;
+  OFFER_CAMPAIGN_DELIVERY?: OfferCampaignBinding;
   AUTH_EMAIL_DELIVERY?: {
     getByName(id: string): { fetch(request: Request): Promise<Response> };
   };
@@ -35,7 +41,10 @@ export default {
     }
     return withWorkerDatabase(
       env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL,
-      async () => app.fetch(request),
+      async () =>
+        withOfferCampaignBinding(env.OFFER_CAMPAIGN_DELIVERY, () =>
+          app.fetch(request),
+        ),
       env.REUSE_DATABASE_CONNECTIONS === true,
     );
   },

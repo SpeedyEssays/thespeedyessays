@@ -10,12 +10,13 @@ type AccountRow = {
   displayName: string | null
 }
 
-export function customerAccountSource() {
+export function customerAccountSource(confirmedOnly = false) {
   return useSupabase
     ? sql`select id::text as id, email,
           left(nullif(trim(raw_user_meta_data->>'full_name'), ''), 100) as name
         from auth.users
         where deleted_at is null and email is not null
+          ${confirmedOnly ? sql`and email_confirmed_at is not null and (banned_until is null or banned_until <= now())` : sql``}
           and not (coalesce(raw_app_meta_data->'roles', '[]'::jsonb) ? 'admin')`
     : sql`select distinct on (user_id) user_id as id, client_email as email, client_name as name
         from public.orders order by user_id, id desc`
@@ -43,6 +44,19 @@ export function searchCustomerAccounts(query: string) {
 export async function findCustomerAccount(id: string) {
   const [account] = await findAccounts('', id)
   return account ?? null
+}
+
+export async function listOfferRecipients() {
+  const { rows } = await getDb().execute<{ id: string }>(sql`
+    select distinct on (lower(email)) id from (${customerAccountSource(true)}) account
+    order by lower(email), id`)
+  return rows.map(({ id }) => id)
+}
+
+export async function findOfferRecipientEmail(id: string): Promise<string | null> {
+  const { rows } = await getDb().execute<{ email: string }>(sql`
+    select email from (${customerAccountSource(true)}) account where id = ${id} limit 1`)
+  return rows[0]?.email?.trim() ?? null
 }
 
 export async function readCustomerProfile(id: string) {

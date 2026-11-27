@@ -4,9 +4,10 @@ import { z } from 'zod'
 
 import { getDb } from '../../db'
 import { customerNotifications, discountCodes, orderFiles, orderMessages, orders, staffAvatars } from '../../db/schema'
+import { messageBody } from './chat-message'
 import { readCustomerProfile } from './customers.server'
 import { discountCodeInput, inactiveDiscountMessage, minimumDiscountMessage } from './discount-codes'
-import { requireAdmin, requireUser } from './identity.functions'
+import { requireAdmin, requireCustomer, requireUser } from './identity.functions'
 import {
   deadlineInHours,
   formatDeadlineDistance,
@@ -97,7 +98,7 @@ const createOrderInput = z.object({
 )
 
 export const createOrder = createServerFn({ method: 'POST' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(createOrderInput)
   .handler(async ({ data, context }) => {
     if (data.instructions.trim().length < 20 && !data.hasFiles) {
@@ -177,7 +178,7 @@ export const createOrder = createServerFn({ method: 'POST' })
   })
 
 export const listMyOrders = createServerFn({ method: 'GET' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .handler(({ context }) => listOrdersForUser(context.user.id))
 
 export const listStaffOrders = createServerFn({ method: 'GET' })
@@ -475,16 +476,10 @@ export const markOrderMessagesRead = createServerFn({ method: 'POST' })
     z.object({
       code: z.string().max(20),
       through: z.number().int().positive().max(2147483647),
-      asSupport: z.boolean(),
     }),
   )
   .handler(async ({ data, context }) => {
-    if (data.asSupport && !context.user.isAdmin)
-      throw new Error('Admin access required.')
-    const order = await findAccessibleOrder(data.code, {
-      id: context.user.id,
-      isAdmin: data.asSupport,
-    })
+    const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     await getDb()
       .update(orderMessages)
@@ -492,7 +487,7 @@ export const markOrderMessagesRead = createServerFn({ method: 'POST' })
       .where(
         and(
           eq(orderMessages.orderId, order.id),
-          eq(orderMessages.sender, data.asSupport ? 'client' : 'support'),
+          eq(orderMessages.sender, context.user.isAdmin ? 'client' : 'support'),
           lte(orderMessages.id, data.through),
           isNull(orderMessages.readAt),
         ),
@@ -505,28 +500,22 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
   .validator(
     z.object({
       code: z.string().max(20),
-      body: z.string().trim().min(1).max(5000),
-      asSupport: z.boolean().optional(),
+      body: messageBody,
     }),
   )
   .handler(async ({ data, context }) => {
-    if (data.asSupport && !context.user.isAdmin)
-      throw new Error('Admin access required.')
-    const supportName = data.asSupport ? context.user.supportName : null
-    if (data.asSupport && !supportName) throw new Error(supportNameRequired)
-    const order = await findAccessibleOrder(data.code, {
-      ...context.user,
-      isAdmin: data.asSupport === true,
-    })
+    const { isAdmin, supportName, id } = context.user
+    if (isAdmin && !supportName) throw new Error(supportNameRequired)
+    const order = await findAccessibleOrder(data.code, context.user)
     if (!order) throw new Error('Order not found.')
     await getDb().transaction(async (tx) => {
       await tx
         .insert(orderMessages)
         .values({
           orderId: order.id,
-          sender: data.asSupport ? 'support' : 'client',
-          supportName,
-          supportUserId: data.asSupport ? context.user.id : null,
+          sender: isAdmin ? 'support' : 'client',
+          supportName: isAdmin ? supportName : null,
+          supportUserId: isAdmin ? id : null,
           body: data.body,
         })
       await tx
@@ -538,7 +527,7 @@ export const sendOrderMessage = createServerFn({ method: 'POST' })
   })
 
 export const approveOrder = createServerFn({ method: 'POST' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(z.object({ code: z.string().max(20), deliveryVersion: z.number().int().nonnegative() }))
   .handler(async ({ data, context }) => {
     const order = await findAccessibleOrder(data.code, { id: context.user.id, isAdmin: false })
@@ -585,7 +574,7 @@ export const approveOrder = createServerFn({ method: 'POST' })
   })
 
 export const requestRevision = createServerFn({ method: 'POST' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(
     z.object({
       code: z.string().max(20),

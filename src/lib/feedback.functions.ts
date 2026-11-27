@@ -4,12 +4,12 @@ import { z } from "zod";
 
 import { getDb } from "../../db";
 import { orderFeedback, orders } from "../../db/schema";
-import { requireAdmin, requireUser } from "./identity.functions";
+import { requireAdmin, requireCustomer } from "./identity.functions";
 import { feedbackView, findAccessibleOrder } from "./order-records";
 import { orderCode, orderIdFromCode } from "./orders";
 
 export const saveOrderFeedback = createServerFn({ method: "POST" })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .validator(
     z.object({
       code: z.string().max(20),

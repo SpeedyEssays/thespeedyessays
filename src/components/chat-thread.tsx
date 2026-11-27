@@ -176,7 +176,12 @@ export function ChatThread({
               ? supportSenderLabel(message.supportName)
               : ownMessage ? ownLabel : otherLabel
             return (
-              <li key={message.id} className={`rounded-md p-2 ${ownMessage ? 'bg-secondary' : 'bg-card'}`}>
+              <li
+                key={message.id}
+                className={`w-fit min-w-32 max-w-[94%] rounded-lg border px-3 py-2 ${
+                  fromSupport ? 'border-chat-support-border bg-chat-support' : 'border-chat-customer-border bg-chat-customer'
+                } ${ownMessage ? 'ml-auto rounded-tr-sm' : 'mr-auto rounded-tl-sm'}`}
+              >
                 <div className="mb-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <div className="flex min-w-0 items-center gap-2">
                     {fromSupport && <StaffAvatar avatarId={message.supportAvatarId} name={message.supportName} />}
@@ -185,7 +190,7 @@ export function ChatThread({
                   <LocalTime at={message.at} className="text-xs text-muted-foreground" />
                 </div>
                 {fromSupport && <p className="mb-2 text-sm">{customerGreeting}</p>}
-                <p className="whitespace-pre-wrap break-words text-sm">
+                <p className="wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed">
                   {fromSupport ? withoutCustomerGreeting(message.body) : message.body}
                 </p>
                 {ownMessage && message.readAt !== undefined && (
@@ -236,8 +241,8 @@ export function ChatThread({
           <Textarea
             aria-label="Message"
             placeholder="Write a message"
+            className="max-h-48 overflow-y-auto"
             rows={2}
-            maxLength={3000}
             value={body}
             onChange={(event) => setBody(event.target.value)}
             required

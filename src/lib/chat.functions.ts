@@ -16,12 +16,14 @@ import {
 } from '../../db/schema'
 import { activeCustomer, touchCustomerPresence } from './customer-presence.server'
 import { findCustomerAccount } from './customers.server'
-import { requireAdmin, requireUser } from './identity.functions'
+import { messageBody } from './chat-message'
+import { requireAdmin, requireCustomer } from './identity.functions'
+import { staffAccountOnly } from './portal-access'
 import { orderCode } from './orders'
 import { readSessionUser, supportChatCookie } from './session.server'
 import { supportNameRequired } from './support-name'
 
-const messageInput = z.object({ body: z.string().trim().min(1).max(3000) })
+const messageInput = z.object({ body: messageBody })
 const staffThread = z.object({ id: z.uuid() })
 const readThrough = z.object({
   through: z.number().int().positive().max(2147483647),
@@ -147,10 +149,16 @@ async function openGuestConversation(db: ChatDb, token: string) {
   return created
 }
 
+async function visitorChatUser() {
+  const user = await readSessionUser()
+  if (user?.isAdmin) throw new Error(staffAccountOnly)
+  return user
+}
+
 export const readVisitorChat = createServerFn({ method: 'GET' }).handler(
   async () => {
-    const user = await readSessionUser()
-    if (user && !user.isAdmin) await touchCustomerPresence(user.id).catch(() => {})
+    const user = await visitorChatUser()
+    if (user) await touchCustomerPresence(user.id).catch(() => {})
     const conversation = await visitorConversation(user?.id)
     return conversation ? messagesFor(conversation.id, conversation.guestOnly) : []
   },
@@ -187,7 +195,7 @@ async function markChatRead(
 export const markVisitorChatRead = createServerFn({ method: 'POST' })
   .validator(readThrough)
   .handler(async ({ data }) => {
-    const user = await readSessionUser()
+    const user = await visitorChatUser()
     const conversation = await visitorConversation(user?.id)
     if (!conversation) return { ok: true }
     return markChatRead(conversation.id, 'agent', data.through, conversation.guestOnly)
@@ -196,7 +204,7 @@ export const markVisitorChatRead = createServerFn({ method: 'POST' })
 export const sendVisitorChat = createServerFn({ method: 'POST' })
   .validator(messageInput)
   .handler(async ({ data }) => {
-    const user = await readSessionUser()
+    const user = await visitorChatUser()
     const token = visitorToken()
     const guestToken = await getDb().transaction(async (tx) => {
       const conversation = user
@@ -273,7 +281,7 @@ export const listSupportChats = createServerFn({ method: 'GET' })
         email: chatConversations.email,
         at: chatConversations.lastMessageAt,
         latest: sql<string | null>`(
-          select cm.body from ${chatMessages} cm where cm.conversation_id = ${chatConversations}."id"
+          select left(cm.body, 240) from ${chatMessages} cm where cm.conversation_id = ${chatConversations}."id"
           order by cm.id desc limit 1
         )`,
         sender: sql<string | null>`(
@@ -334,7 +342,7 @@ function inboxCounts(website: number, orders: { orderId: number; unread: number 
 }
 
 export const getCustomerInboxCounts = createServerFn({ method: 'GET' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .handler(async ({ context }) => {
     const conversation = await visitorConversation(context.user.id)
     const [website, orders, notifications] = await Promise.all([

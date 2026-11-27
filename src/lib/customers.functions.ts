@@ -8,7 +8,7 @@ import {
   readCustomerProfile,
   searchCustomerAccounts,
 } from './customers.server'
-import { requireAdmin, requireUser } from './identity.functions'
+import { requireAdmin, requireCustomer } from './identity.functions'
 
 const customerId = z.string().min(1).max(128)
 
@@ -27,7 +27,7 @@ export const getStaffCustomer = createServerFn({ method: 'GET' })
   })
 
 export const getMyDisplayName = createServerFn({ method: 'GET' })
-  .middleware([requireUser])
+  .middleware([requireCustomer])
   .handler(
     async ({ context }) =>
       (await readCustomerProfile(context.user.id)).displayName,

@@ -65,6 +65,8 @@ export const Route = createFileRoute('/dashboard')({
     const user = await getServerUser()
     if (!user)
       throw redirect({ to: '/account', search: { next: location.href } })
+    if (user.isAdmin)
+      throw redirect({ to: '/account', search: { next: location.href, denied: true } })
     return { user }
   },
   loader: async () => {

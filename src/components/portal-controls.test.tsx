@@ -9,6 +9,7 @@ import { OrderDeadline } from "./order-deadline";
 import { OrderFeedbackForm } from "./order-feedback-form";
 import { OrderFileUpload } from "./order-file-upload";
 import { OrderPanel } from "./order-panel";
+import { StaffCampaigns } from "./staff-campaigns";
 import { StaffNotifications } from "./staff-notifications";
 import { StaffOrderPrice } from "./staff-order-price";
 import { StaffOrderStatus } from "./staff-order-status";
@@ -19,6 +20,9 @@ const stubs = vi.hoisted(() => ({
   updateOrderStatus: vi.fn(),
   listStaffCustomers: vi.fn(),
   getStaffCustomer: vi.fn(),
+  getOfferCampaignProgress: vi.fn(),
+  queueOfferCampaign: vi.fn(),
+  sendOfferEmail: vi.fn(),
   sendCustomerNotification: vi.fn(),
   broadcastCustomerNotification: vi.fn(),
   offerOrderPrice: vi.fn(),
@@ -77,9 +81,51 @@ vi.mock("@/lib/notifications.functions", () => ({
   broadcastCustomerNotification: stubs.broadcastCustomerNotification,
   sendPaymentReminder: stubs.sendPaymentReminder,
 }));
+vi.mock("@/lib/discount-codes.functions", () => ({
+  createDiscountCode: vi.fn(),
+  setDiscountCodeActive: vi.fn(),
+}));
+vi.mock("@/lib/offer-email.functions", () => ({
+  getOfferCampaignProgress: stubs.getOfferCampaignProgress,
+  queueOfferCampaign: stubs.queueOfferCampaign,
+  resumeOfferCampaign: vi.fn(),
+  sendOfferEmail: stubs.sendOfferEmail,
+}));
 
 beforeEach(() => {
   vi.resetAllMocks();
+});
+
+it("keeps individual campaign email and can queue an offer for all customers", async () => {
+  const user = userEvent.setup();
+  stubs.getOfferCampaignProgress.mockResolvedValue(null);
+  stubs.queueOfferCampaign.mockResolvedValue({ total: 3 });
+  render(<StaffCampaigns codes={[]} />);
+  expect(screen.getByRole("radio", { name: "One customer" })).toBeChecked();
+  expect(
+    screen.getByRole("button", { name: "Send offer email" }),
+  ).toBeDisabled();
+  await user.click(screen.getByRole("radio", { name: "All customers" }));
+  await user.type(screen.getByLabelText("Offer headline"), "A November offer");
+  await user.type(
+    screen.getByLabelText("Message"),
+    "Save on your next project.",
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Send offer to all customers" }),
+  );
+  expect(
+    await screen.findByText("Campaign queued for 3 customers."),
+  ).toBeInTheDocument();
+  expect(stubs.queueOfferCampaign).toHaveBeenCalledExactlyOnceWith({
+    data: {
+      requestId: expect.any(String),
+      headline: "A November offer",
+      message: "Save on your next project.",
+      discountCode: undefined,
+    },
+  });
+  expect(stubs.sendOfferEmail).not.toHaveBeenCalled();
 });
 
 it("allows a customer to rate an approved order without a comment, then edit the feedback", async () => {

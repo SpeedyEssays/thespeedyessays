@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 const session = vi.hoisted(() => ({
-  user: { id: "order-owner", isAdmin: true },
+  user: { id: "order-owner", isAdmin: false },
   releaseFiles: vi.fn(),
   approve: vi.fn(),
   findOrder: vi.fn(),
@@ -27,7 +27,11 @@ vi.mock("@tanstack/react-start", () => ({
     return builder;
   },
 }));
-vi.mock("./identity.functions", () => ({ requireUser: {}, requireAdmin: {} }));
+vi.mock("./identity.functions", () => ({
+  requireUser: {},
+  requireAdmin: {},
+  requireCustomer: {},
+}));
 vi.mock("./customers.server", () => ({ readCustomerProfile: vi.fn() }));
 vi.mock("./order-records", () => ({ findAccessibleOrder: session.findOrder }));
 vi.mock("../../db", () => ({
@@ -70,7 +74,7 @@ beforeEach(() => {
   session.saveRevision.mockResolvedValue([{ id: 1 }]);
 });
 
-it("allows a staff account to approve its own delivered order from the customer portal", async () => {
+it("allows the customer to approve their own delivered order", async () => {
   await expect(approveOrder({ data })).resolves.toEqual({ ok: true });
   expect(session.findOrder).toHaveBeenCalledWith(data.code, {
     id: "order-owner",
@@ -79,8 +83,8 @@ it("allows a staff account to approve its own delivered order from the customer 
   expect(session.releaseFiles).toHaveBeenCalledOnce();
 });
 
-it("limits approval to the order owner even when the caller has staff access", async () => {
-  session.user.id = "other-staff";
+it("limits customer approval to the order owner", async () => {
+  session.user.id = "other-customer";
   await expect(approveOrder({ data })).rejects.toThrow("Order not found.");
   expect(session.approve).not.toHaveBeenCalled();
   expect(session.releaseFiles).not.toHaveBeenCalled();

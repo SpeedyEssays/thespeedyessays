@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { messageBody } from "@/lib/chat-message";
 import { ChatThread } from "./chat-thread";
 
 it.each(["client", "support"])(
@@ -32,6 +33,8 @@ it.each(["client", "support"])(
     );
     const question = await screen.findByText("Customer question");
     const reply = screen.getByText("Staff reply");
+    expect(question.closest("li")).toHaveClass("bg-chat-customer");
+    expect(reply.closest("li")).toHaveClass("bg-chat-support");
     expect(question.closest("li")?.querySelector("time")).toHaveAttribute(
       "datetime",
       rows[0].at,
@@ -44,6 +47,27 @@ it.each(["client", "support"])(
     expect(reply.closest("li")).toHaveTextContent("Dear Customer,Staff reply");
   },
 );
+
+it("allows a multi-paragraph message longer than the old website and order chat limits", async () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+  const message = "Detailed order instructions.\n\n".repeat(300).trim();
+  expect(message.length).toBeGreaterThan(5000);
+  expect(messageBody.parse(message)).toBe(message);
+  render(
+    <ChatThread
+      load={async () => []}
+      send={send}
+      ownSender="client"
+      otherLabel="Support"
+      emptyText="No messages"
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "Message" });
+  expect(input).not.toHaveAttribute("maxlength");
+  fireEvent.change(input, { target: { value: message } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(send).toHaveBeenCalledExactlyOnceWith(message));
+});
 
 it.each(["agent", "support"])(
   "shows the avatar of the specific staff member in a %s chat",
