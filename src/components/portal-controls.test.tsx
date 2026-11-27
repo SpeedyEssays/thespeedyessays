@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { AdminOrderView, OrderView } from "@/lib/orders";
 import { CustomerNotifications } from "./customer-notifications";
+import { CustomerOrderTable } from "./customer-order-table";
 import { CustomerOrderRequests } from "./customer-order-requests";
 import { CustomerWallet } from "./customer-wallet";
 import { OrderDeadline } from "./order-deadline";
@@ -49,12 +50,23 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
     search,
+    hash,
+    "aria-label": label,
     children,
   }: {
     to: string;
     search: Record<string, string>;
+    hash?: string;
+    "aria-label"?: string;
     children: ReactNode;
-  }) => <a href={`${to}?${new URLSearchParams(search)}`}>{children}</a>,
+  }) => (
+    <a
+      aria-label={label}
+      href={`${to}?${new URLSearchParams(search)}${hash ? `#${hash}` : ""}`}
+    >
+      {children}
+    </a>
+  ),
 }));
 vi.mock("@/components/chat-thread", () => ({ ChatThread: () => null }));
 vi.mock("@/lib/feedback.functions", () => ({
@@ -453,6 +465,94 @@ function deliveredOrder() {
   } as OrderView;
 }
 
+it("keeps all orders reachable through the table, status filters and search", async () => {
+  const user = userEvent.setup();
+  const orders = Array.from({ length: 14 }, (_, index): OrderView => ({
+    ...deliveredOrder(),
+    code: `SE-${48001 + index}`,
+    title: index === 13 ? "Environmental policy review" : `Essay ${index + 1}`,
+    status: index === 13 ? "awaiting-payment" : "completed",
+  }));
+  render(
+    <CustomerOrderTable
+      orders={orders}
+      now={Date.now()}
+      unreadByOrder={{ "SE-48014": 2 }}
+    />,
+  );
+
+  const table = screen.getByRole("table", { name: "Your orders" });
+  expect(within(table).getAllByRole("row")).toHaveLength(13);
+  expect(
+    within(table).getByRole("columnheader", { name: "Total in USD" }),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  const orderLink = screen.getByRole("link", {
+    name: "Open order SE-48014 Environmental policy review",
+  });
+  expect(orderLink).toHaveAttribute(
+    "href",
+    "/dashboard?order=SE-48014#customer-order-details",
+  );
+  const row = screen.getByRole("row", { name: /SE-48014/ });
+  expect(within(row).getByText("Awaiting payment")).toBeVisible();
+  expect(within(row).getAllByText("2 unread").length).toBeGreaterThan(0);
+
+  await user.selectOptions(screen.getByLabelText("Status"), "awaiting-payment");
+  expect(within(table).getAllByRole("row")).toHaveLength(2);
+  await user.type(
+    screen.getByRole("searchbox", { name: "Find an order" }),
+    "missing title",
+  );
+  expect(
+    screen.getByText("No orders match your search or status filter."),
+  ).toBeVisible();
+  await user.clear(screen.getByRole("searchbox", { name: "Find an order" }));
+  await user.type(
+    screen.getByRole("searchbox", { name: "Find an order" }),
+    "SE-48014",
+  );
+  expect(screen.getByRole("link", { name: /SE-48014/ })).toBeVisible();
+});
+
+it("expands the complete instructions and keeps files and unread messages one tab away", async () => {
+  const user = userEvent.setup();
+  const instructions =
+    "Review both sources.\n".repeat(12) + "Include the complete bibliography.";
+  render(
+    <OrderPanel
+      order={{ ...deliveredOrder(), instructions }}
+      now={Date.now()}
+      unreadMessages={2}
+    />,
+  );
+
+  await user.click(screen.getByRole("tab", { name: "Overview" }));
+  const showMore = screen.getByRole("button", { name: "Show more" });
+  expect(showMore).toHaveAttribute("aria-expanded", "false");
+  const content = document.getElementById(
+    showMore.getAttribute("aria-controls")!,
+  );
+  expect(content?.textContent).not.toContain(
+    "Include the complete bibliography.",
+  );
+  await user.click(showMore);
+  expect(content?.textContent).toBe(instructions);
+  await user.click(screen.getByRole("button", { name: "Show less" }));
+  expect(content?.textContent).not.toContain(
+    "Include the complete bibliography.",
+  );
+
+  await user.click(screen.getByRole("tab", { name: "Files & approval" }));
+  expect(screen.getByRole("region", { name: "Your uploads" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Approve order" })).toBeVisible();
+  await user.click(screen.getByRole("tab", { name: "Messages 2 unread" }));
+  expect(screen.getByRole("heading", { name: "Order messages" })).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Approve order" }),
+  ).not.toBeInTheDocument();
+});
+
 it("counts down from the saved deadline and marks an active order overdue at expiry", () => {
   const deadline = Date.parse("2026-12-10T12:00:00Z");
   const order = {
@@ -534,6 +634,7 @@ it("offers the preview and a red revision action alongside approval, then shows 
   expect(
     screen.getByRole("link", { name: "Download Final.docx" }),
   ).toHaveTextContent("Download clean copy");
+  await user.click(screen.getByRole("tab", { name: "Requests & feedback" }));
   expect(
     screen.getByRole("heading", { name: "Rate your order" }),
   ).toBeInTheDocument();

@@ -5,14 +5,14 @@ import {
   redirect,
   useRouter,
 } from '@tanstack/react-router'
-import { Bell, MessageSquare, Package, Plus, Wallet } from 'lucide-react'
+import { ArrowLeft, Bell, MessageSquare, Package, Plus, Wallet } from 'lucide-react'
 import { PortalShell } from '@/components/portal-shell'
 import { UnreadBadge } from '@/components/chat-indicators'
 import { SupportChat } from '@/components/chat-widget'
 import { CustomerNotifications } from '@/components/customer-notifications'
+import { CustomerOrderTable } from '@/components/customer-order-table'
 import { CustomerWallet } from '@/components/customer-wallet'
 import { Button } from '@/components/ui/button'
-import { OrderDeadline } from '@/components/order-deadline'
 import { OrderPanel } from '@/components/order-panel'
 import { getMyDisplayName } from '@/lib/customers.functions'
 import { getCustomerInboxCounts } from '@/lib/chat.functions'
@@ -22,32 +22,10 @@ import { isCheckoutAvailable, refreshPayment } from '@/lib/payments.functions'
 import { formatUSD } from '@/lib/pricing'
 import { getMyWallet, getMyWalletBalance } from '@/lib/wallet.functions'
 import { walletReferencePattern } from '@/lib/wallet'
-import { canCheckout, statusMeta, type OrderStatus, type OrderView } from '@/lib/orders'
+import { canCheckout } from '@/lib/orders'
 import { useCustomerActivity } from '@/lib/use-customer-activity'
 import { useInboxData } from '@/lib/use-inbox-data'
 import { useOrderClock } from '@/lib/use-order-clock'
-
-const orderGroupLabels = {
-  'awaiting-payment': 'Orders awaiting payment',
-  'in-progress': 'Orders in progress',
-  revision: 'Orders in revision',
-  completed: 'Completed orders',
-  approved: 'Approved orders',
-  cancelled: 'Cancelled orders',
-  other: 'Other orders',
-} as const
-
-const orderGroupByStatus: Record<OrderStatus, keyof typeof orderGroupLabels> = {
-  'awaiting-payment': 'awaiting-payment',
-  paid: 'in-progress',
-  'writer-assigned': 'in-progress',
-  'in-progress': 'in-progress',
-  'draft-ready': 'in-progress',
-  revision: 'revision',
-  completed: 'completed',
-  approved: 'approved',
-  cancelled: 'cancelled',
-}
 
 export const Route = createFileRoute('/dashboard')({
   validateSearch: (
@@ -106,7 +84,7 @@ function Dashboard() {
   const router = useRouter()
   const [paymentNotice, setPaymentNotice] = useState('')
   const [verifying, setVerifying] = useState(false)
-  const selected = orders.find((item) => item.code === order) ?? orders[0]
+  const selected = order ? orders.find((item) => item.code === order) : undefined
 
   async function checkPayment() {
     if (!reference) return
@@ -166,7 +144,7 @@ function Dashboard() {
         <Button variant={tab ? 'ghost' : 'default'} asChild>
           <Link
             to="/dashboard"
-            search={{ order }}
+            search={{}}
             aria-current={tab ? undefined : 'page'}
           >
             <Package /> My orders <UnreadBadge count={counts?.ordersTotal} />
@@ -237,7 +215,11 @@ function Dashboard() {
             </div>
           )}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-2xl font-semibold">My orders</h2>
+            {selected ? (
+              <Button variant="ghost" size="sm" className="-ml-2" asChild>
+                <Link to="/dashboard" search={{}}><ArrowLeft /> Back to orders</Link>
+              </Button>
+            ) : <h2 className="text-2xl font-semibold">My orders</h2>}
             <Button
               variant="outline"
               size="sm"
@@ -246,77 +228,24 @@ function Dashboard() {
               Refresh orders
             </Button>
           </div>
-          {selected ? (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <CustomerOrderList orders={orders} selected={selected.code} unreadByOrder={counts?.orders} now={now} />
-              <OrderPanel
-                key={selected.code}
-                order={selected}
-                now={now}
-                walletBalanceCents={balanceCents}
-                canPayTipOnline={canPayTipOnline}
-                tipCheckout={selected.code === order ? tipCheckout : undefined}
-                onRead={refreshUnread}
-              />
-            </div>
-          ) : (
-            <p className="rounded-xl border bg-card p-6">
-              Your orders will appear here after you place one.
-            </p>
+          {order && !selected && <p role="status" className="mb-3 text-sm text-muted-foreground">That order isn’t available. You can choose an order below.</p>}
+          <div hidden={Boolean(selected)}>
+            <CustomerOrderTable orders={orders} unreadByOrder={counts?.orders} now={now} />
+          </div>
+          {selected && (
+            <OrderPanel
+              key={selected.code}
+              order={selected}
+              now={now}
+              walletBalanceCents={balanceCents}
+              canPayTipOnline={canPayTipOnline}
+              tipCheckout={tipCheckout}
+              unreadMessages={counts?.orders[selected.code]}
+              onRead={refreshUnread}
+            />
           )}
         </>
       )}
     </PortalShell>
-  )
-}
-
-function CustomerOrderList({
-  orders,
-  selected,
-  unreadByOrder,
-  now,
-}: {
-  orders: OrderView[]
-  selected: string
-  unreadByOrder?: Record<string, number>
-  now: number | null
-}) {
-  const groups = Object.entries(orderGroupLabels)
-    .map(([key, label]) => ({
-      label,
-      orders: orders.filter(
-        (item) => (orderGroupByStatus[item.status] ?? 'other') === key,
-      ),
-    }))
-    .filter((group) => group.orders.length > 0)
-
-  return (
-    <nav aria-label="Your orders" className="space-y-5">
-      {groups.map((group) => (
-        <div key={group.label} className="space-y-2">
-          <h3 className="text-sm font-sans font-semibold tracking-normal">
-            {group.label}
-          </h3>
-          {group.orders.map((item) => (
-            <Link
-              className={`block rounded-lg border p-3 text-sm ${item.code === selected ? 'border-primary bg-secondary' : 'bg-card'}`}
-              key={item.code}
-              to="/dashboard"
-              search={{ order: item.code }}
-              aria-current={item.code === selected ? 'true' : undefined}
-            >
-              <span className="flex flex-wrap items-center gap-2 font-semibold">
-                <span>{item.code} · {statusMeta[item.status]?.label ?? item.status}</span>
-                <UnreadBadge count={unreadByOrder?.[item.code]} />
-              </span>
-              <span className="block break-words">{item.title}</span>
-              <span className="mt-1 block text-xs">
-                <OrderDeadline order={item} now={now} />
-              </span>
-            </Link>
-          ))}
-        </div>
-      ))}
-    </nav>
   )
 }
